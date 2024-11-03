@@ -38,6 +38,7 @@ class Configuration:
     virials: Optional[Virials] = None  # eV
     dipole: Optional[Vector] = None  # Debye
     charges: Optional[Charges] = None  # atomic unit
+    atomic_target: Optional[Charges] = None
     cell: Optional[Cell] = None
     pbc: Optional[Pbc] = None
 
