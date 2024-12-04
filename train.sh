@@ -1,0 +1,27 @@
+python scripts/run_train.py \
+    --model="AtomicTargetsMACE" \
+    --num_interactions=2 \
+    --num_channels=32 \
+    --max_L=0 \
+    --correlation=2 \
+    --r_max=2.5 \
+    --max_ell=2 \
+    --loss="atomic_targets" \
+    --error_table="AtomicTargetsPerAtomRMSE" \
+    --name="mace_solvents" \
+    --model_dir="MACE_models" \
+    --log_dir="MACE_models" \
+    --checkpoints_dir="MACE_models" \
+    --results_dir="MACE_models" \
+    --train_file="data/data_substructures27_rc5_periodic_mask.xyz" \
+    --valid_fraction=0.10 \
+    --E0s="average" \
+    --atomic_targets_key="d2min" \
+    --atomic_targets_mask_key="MACE_atomic_targets_mask" \
+    --atomic_targets_random_mask \
+    --atomic_targets_random_mask_ratio=0.8 \
+    --device=cpu \
+    --batch_size=4 \
+    --max_num_epochs=50 \
+    --swa \
+    --seed=123

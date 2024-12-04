@@ -383,12 +383,24 @@ class WeightedEnergyForcesDipoleLoss(torch.nn.Module):
         )
 
 class AtomicTargetsLoss(torch.nn.Module):
-    def __init__(self, huber_delta=0.01) -> None:
+    def __init__(self, huber_delta=0.01, random_mask=False, random_mask_ratio=None) -> None:
         super().__init__()
         self.huber_loss = torch.nn.HuberLoss(reduction="mean", delta=huber_delta)
+        # use random mask or not
+        self.random_mask = random_mask
+        # preserve `rando_mask_ratio` of points that are not masked
+        self.random_mask_ratio = random_mask_ratio
 
     def forward(self, ref: Batch, pred: TensorDict) -> torch.Tensor:
-        return self.huber_loss(ref["atomic_targets"], pred["atomic_targets"])*1e3
+        mask = ref["atomic_targets_mask"]
+        if self.random_mask:
+            ones_indices = torch.nonzero(mask, as_tuple=True)[0]
+            num_ones_to_keep = int(len(ones_indices) * self.random_mask_ratio)
+            selected_indices = ones_indices[torch.randperm(len(ones_indices))[:num_ones_to_keep]]
+            mask = torch.zeros_like(mask)
+            mask[selected_indices] = 1
+        return self.huber_loss(ref["atomic_targets"] * mask, \
+                               pred["atomic_targets"] * mask) * 1e3
 
     def __repr__(self):
         return f"{self.__class__.__name__}(huber_delta={self.huber_loss.delta:.3f})"

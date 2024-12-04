@@ -49,6 +49,7 @@ def get_dataset_from_xyz(
     dipole_key: str = "dipoles",
     charges_key: str = "charges",
     atomic_targets_key: str = "atomic_targets",
+    atomic_targets_mask_key: str = "MACE_atomic_targets_mask",
     head_key: str = "head",
 ) -> Tuple[SubsetCollection, Optional[Dict[int, float]]]:
     """Load training and test dataset from xyz file"""
@@ -62,6 +63,7 @@ def get_dataset_from_xyz(
         dipole_key=dipole_key,
         charges_key=charges_key,
         atomic_targets_key=atomic_targets_key,
+        atomic_targets_mask_key=atomic_targets_mask_key,
         head_key=head_key,
         extract_atomic_energies=True,
         keep_isolated_atoms=keep_isolated_atoms,
@@ -81,6 +83,7 @@ def get_dataset_from_xyz(
             dipole_key=dipole_key,
             charges_key=charges_key,
             atomic_targets_key=atomic_targets_key,
+            atomic_targets_mask_key=atomic_targets_mask_key,
             head_key=head_key,
             extract_atomic_energies=False,
             head_name=head_name,
@@ -452,7 +455,7 @@ def get_loss_fn(
     elif args.loss == "atomic_targets":
         assert dipole_only is False and targets_only is True
         loss_fn = modules.AtomicTargetsLoss(
-            huber_delta=args.huber_delta,
+            huber_delta=args.huber_delta, random_mask = args.atomic_targets_random_mask, random_mask_ratio = args.atomic_targets_random_mask_ratio,
         )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)
