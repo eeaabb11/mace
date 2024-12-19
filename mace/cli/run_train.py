@@ -284,6 +284,7 @@ def run(args: argparse.Namespace) -> None:
                 dipole_key=args.dipole_key,
                 charges_key=args.charges_key,
                 atomic_targets_key=args.atomic_targets_key,
+                atomic_targets_mask_key=args.atomic_targets_mask_key,
                 head_name="pt_head",
                 keep_isolated_atoms=args.keep_isolated_atoms,
             )
@@ -302,6 +303,7 @@ def run(args: argparse.Namespace) -> None:
                 dipole_key=args.dipole_key,
                 charges_key=args.charges_key,
                 atomic_targets_key=args.atomic_targets_key,
+                atomic_targets_mask_key=args.atomic_targets_mask_key,
                 keep_isolated_atoms=args.keep_isolated_atoms,
                 collections=collections,
                 avg_num_neighbors=model_foundation.interactions[0].avg_num_neighbors,

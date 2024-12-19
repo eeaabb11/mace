@@ -40,6 +40,7 @@ class Configuration:
     dipole: Optional[Vector] = None  # Debye
     charges: Optional[Charges] = None  # atomic unit
     atomic_targets: Optional[AtomicTargets] = None
+    atomic_targets_mask: Optional[AtomicTargets] =  None
     cell: Optional[Cell] = None
     pbc: Optional[Pbc] = None
 
@@ -95,6 +96,7 @@ def config_from_atoms_list(
     dipole_key="REF_dipole",
     charges_key="REF_charges",
     atomic_targets_key="REF_atomic_targets",
+    atomic_targets_mask_key="MACE_atomic_targets_mask",
     head_key="head",
     config_type_weights: Optional[Dict[str, float]] = None,
 ) -> Configurations:
@@ -114,6 +116,7 @@ def config_from_atoms_list(
                 dipole_key=dipole_key,
                 charges_key=charges_key,
                 atomic_targets_key=atomic_targets_key,
+                atomic_targets_mask_key=atomic_targets_mask_key,
                 head_key=head_key,
                 config_type_weights=config_type_weights,
             )
@@ -130,6 +133,7 @@ def config_from_atoms(
     dipole_key="REF_dipole",
     charges_key="REF_charges",
     atomic_targets_key="REF_atomic_targets",
+    atomic_targets_mask_key="MACE_atomic_targets_mask",
     head_key="head",
     config_type_weights: Optional[Dict[str, float]] = None,
 ) -> Configuration:
@@ -146,6 +150,9 @@ def config_from_atoms(
     charges = atoms.arrays.get(charges_key, np.zeros(len(atoms)))  # atomic unit
     # Atomic targets default to 0 instead of None if not found
     atomic_targets = atoms.arrays.get(atomic_targets_key, np.zeros(len(atoms)))
+    # Atomic targets default to 1 instead of None if not found
+    atomic_targets_mask = atoms.arrays.get(atomic_targets_mask_key, np.ones(len(atoms)))
+    
     atomic_numbers = np.array(
         [ase.data.atomic_numbers[symbol] for symbol in atoms.symbols]
     )
@@ -189,6 +196,7 @@ def config_from_atoms(
         dipole=dipole,
         charges=charges,
         atomic_targets=atomic_targets,
+        atomic_targets_mask=atomic_targets_mask,
         weight=weight,
         head=head,
         energy_weight=energy_weight,
@@ -228,6 +236,7 @@ def load_from_xyz(
     dipole_key: str = "REF_dipole",
     charges_key: str = "REF_charges",
     atomic_targets_key: str = "REF_atomic_targets",
+    atomic_targets_mask_key: str = "MACE_atomic_targets_mask",
     head_key: str = "head",
     head_name: str = "Default",
     extract_atomic_energies: bool = False,
@@ -307,6 +316,7 @@ def load_from_xyz(
         dipole_key=dipole_key,
         charges_key=charges_key,
         atomic_targets_key=atomic_targets_key,
+        atomic_targets_mask_key=atomic_targets_mask_key,
         head_key=head_key,
     )
     return atomic_energies_dict, configs
