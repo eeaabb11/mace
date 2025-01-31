@@ -217,11 +217,12 @@ def train(
                 swa.scheduler.step()
 
         # Train
+        wandb_log_dict = {}
         if distributed:
             train_sampler.set_epoch(epoch)
         if "ScheduleFree" in type(optimizer).__name__:
             optimizer.train()
-        train_one_epoch(
+        train_loss_epoch = train_one_epoch(
             model=model,
             loss_fn=loss_fn,
             data_loader=train_loader,
@@ -238,6 +239,9 @@ def train(
         if distributed:
             torch.distributed.barrier()
 
+        if log_wandb:
+            wandb_log_dict["train_loss"] = train_loss_epoch
+
         # Validate
         if epoch % eval_interval == 0:
             model_to_evaluate = (
@@ -250,7 +254,7 @@ def train(
                 optimizer.eval()
             with param_context:
                 valid_loss = 0.0
-                wandb_log_dict = {}
+                #wandb_log_dict = {}
                 for valid_loader_name, valid_loader in valid_loaders.items():
                     valid_loss_head, eval_metrics = evaluate(
                         model=model_to_evaluate,
@@ -272,10 +276,7 @@ def train(
                             wandb_log_dict[valid_loader_name] = {
                                 "epoch": epoch,
                                 "valid_loss": valid_loss_head,
-                                "valid_rmse_e_per_atom": eval_metrics[
-                                    "rmse_e_per_atom"
-                                ],
-                                "valid_rmse_f": eval_metrics["rmse_f"],
+                                "valid_rmse_atomic_target_per_atom": eval_metrics["rmse_atomic_target_per_atom"],
                             }
                 valid_loss = (
                     valid_loss_head  # consider only the last head for the checkpoint
@@ -343,8 +344,9 @@ def train_one_epoch(
     rank: Optional[int] = 0,
 ) -> None:
     model_to_train = model if distributed_model is None else distributed_model
+    train_loss_epoch = 0
     for batch in data_loader:
-        _, opt_metrics = take_step(
+        train_loss_batch, opt_metrics = take_step(
             model=model_to_train,
             loss_fn=loss_fn,
             batch=batch,
@@ -356,8 +358,10 @@ def train_one_epoch(
         )
         opt_metrics["mode"] = "opt"
         opt_metrics["epoch"] = epoch
+        train_loss_epoch =+ train_loss_batch
         if rank == 0:
             logger.log(opt_metrics)
+    return train_loss_epoch
 
 
 def take_step(
