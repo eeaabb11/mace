@@ -18,6 +18,7 @@ import torch.distributed
 import torch.nn.functional
 from e3nn.util import jit
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim import LBFGS
 from torch.utils.data import ConcatDataset
 from torch_ema import ExponentialMovingAverage
 
@@ -501,7 +502,7 @@ def run(args: argparse.Namespace) -> None:
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=True,
-                drop_last=True,
+                drop_last=(not args.lbfgs),
                 seed=args.seed,
             )
             valid_samplers[head] = valid_sampler
@@ -510,7 +511,7 @@ def run(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
-        drop_last=(train_sampler is None),
+        drop_last=(train_sampler is None and not args.lbfgs),
         pin_memory=args.pin_memory,
         num_workers=args.num_workers,
         generator=torch.Generator().manual_seed(args.seed),
@@ -524,7 +525,7 @@ def run(args: argparse.Namespace) -> None:
             batch_size=args.valid_batch_size,
             sampler=valid_samplers[head] if args.distributed else None,
             shuffle=False,
-            drop_last=False,
+            drop_last=False if args.lbfgs else True,
             pin_memory=args.pin_memory,
             num_workers=args.num_workers,
             generator=torch.Generator().manual_seed(args.seed),
@@ -577,6 +578,8 @@ def run(args: argparse.Namespace) -> None:
     )
 
     start_epoch = 0
+    restart_lbfgs = False
+    opt_start_epoch = None
     if args.restart_latest:
         try:
             opt_start_epoch = checkpoint_handler.load_latest(
@@ -585,11 +588,14 @@ def run(args: argparse.Namespace) -> None:
                 device=device,
             )
         except Exception:  # pylint: disable=W0703
-            opt_start_epoch = checkpoint_handler.load_latest(
-                state=tools.CheckpointState(model, optimizer, lr_scheduler),
-                swa=False,
-                device=device,
-            )
+            try:
+                opt_start_epoch = checkpoint_handler.load_latest(
+                    state=tools.CheckpointState(model, optimizer, lr_scheduler),
+                    swa=False,
+                    device=device,
+                )
+            except Exception: # pylint: disable=W0703
+                restart_lbfgs = True
         if opt_start_epoch is not None:
             start_epoch = opt_start_epoch
 
@@ -599,6 +605,21 @@ def run(args: argparse.Namespace) -> None:
     else:
         for group in optimizer.param_groups:
             group["lr"] = args.lr
+
+    if args.lbfgs:
+        logging.info("Switching optimizer to LBFGS")
+        optimizer = LBFGS(model.parameters(),
+                          history_size=200,
+                          max_iter=20,
+                          line_search_fn="strong_wolfe")
+        if restart_lbfgs:
+            opt_start_epoch = checkpoint_handler.load_latest(
+                state=tools.CheckpointState(model, optimizer, lr_scheduler),
+                swa=False,
+                device=device,
+            )
+            if opt_start_epoch is not None:
+                start_epoch = opt_start_epoch
 
     if args.wandb:
         setup_wandb(args)
