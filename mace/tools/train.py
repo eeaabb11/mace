@@ -223,7 +223,7 @@ def train(
             train_sampler.set_epoch(epoch)
         if "ScheduleFree" in type(optimizer).__name__:
             optimizer.train()
-        avg_train_loss = train_one_epoch(
+        train_loss_epoch = train_one_epoch(
             model=model,
             loss_fn=loss_fn,
             data_loader=train_loader,
@@ -242,7 +242,7 @@ def train(
             torch.distributed.barrier()
 
         if log_wandb:
-            wandb_log_dict["train_loss"] = avg_train_loss
+            wandb_log_dict["train_loss"] = train_loss_epoch
 
         # Validate
         if epoch % eval_interval == 0:
@@ -345,11 +345,9 @@ def train_one_epoch(
     distributed:bool,
     distributed_model: Optional[DistributedDataParallel] = None,
     rank: Optional[int] = 0,
-) -> float:
+) -> None:
     model_to_train = model if distributed_model is None else distributed_model
-
-    total_loss = 0.0
-    num_batches = 0
+    train_loss_epoch = 0
     for batch in data_loader:
         if isinstance(optimizer, LBFGS):
             _, opt_metrics = take_step_lbfgs(
