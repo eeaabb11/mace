@@ -16,7 +16,9 @@ from mace.tools import torch_geometric, torch_tools, utils
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("--configs", help="path to XYZ configurations", required=True)
     parser.add_argument("--model", help="path to model", required=True)
     parser.add_argument("--output", help="output path", required=True)
@@ -53,6 +55,13 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="MACE_",
     )
+    parser.add_argument(
+        "--head",
+        help="Model head used for evaluation",
+        type=str,
+        required=False,
+        default=None,
+    )
     return parser.parse_args()
 
 
@@ -76,14 +85,22 @@ def run(args: argparse.Namespace) -> None:
 
     # Load data and prepare input
     atoms_list = ase.io.read(args.configs, index=":")
+    if args.head is not None:
+        for atoms in atoms_list:
+            atoms.info["head"] = args.head
     configs = [data.config_from_atoms(atoms) for atoms in atoms_list]
 
     z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 
+    try:
+        heads = model.heads
+    except AttributeError:
+        heads = None
+
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=[
             data.AtomicData.from_config(
-                config, z_table=z_table, cutoff=float(model.r_max)
+                config, z_table=z_table, cutoff=float(model.r_max), heads=heads
             )
             for config in configs
         ],
@@ -93,30 +110,55 @@ def run(args: argparse.Namespace) -> None:
     )
 
     # Collect data
-    atomic_targets_list = []
+    energies_list = []
+    contributions_list = []
+    stresses_list = []
+    forces_collection = []
 
     for batch in data_loader:
         batch = batch.to(device)
-        output = model(batch.to_dict())
-        
-        print("Output keys:", output.keys())  # Debugging
-        print("Output atomic_targets shape:", output["atomic_targets"].shape)
-        
-        # Directly use output["atomic_targets"] without concatenating
-        atomic_targets = torch_tools.to_numpy(output["atomic_targets"])
-        
-        # Ensure atomic_target is reshaped to (num_atoms, 1) to be compatible with ASE
-        atomic_target = atomic_targets[:, np.newaxis]  # Convert to shape (num_atoms, 1)
+        output = model(batch.to_dict(), compute_stress=args.compute_stress)
+        energies_list.append(torch_tools.to_numpy(output["energy"]))
+        if args.compute_stress:
+            stresses_list.append(torch_tools.to_numpy(output["stress"]))
 
-        # Assign atomic targets to the single configuration in atoms_list
-        atoms = atoms_list[0]  # Since batch size is 1, we assume one config per batch
-        atoms.calc = None  # Reset calculator
-        atoms.arrays[args.info_prefix + "atomic_targets"] = atomic_target
+        if args.return_contributions:
+            contributions_list.append(torch_tools.to_numpy(output["contributions"]))
+
+        forces = np.split(
+            torch_tools.to_numpy(output["forces"]),
+            indices_or_sections=batch.ptr[1:],
+            axis=0,
+        )
+        forces_collection.append(forces[:-1])  # drop last as its empty
+
+    energies = np.concatenate(energies_list, axis=0)
+    forces_list = [
+        forces for forces_list in forces_collection for forces in forces_list
+    ]
+    assert len(atoms_list) == len(energies) == len(forces_list)
+    if args.compute_stress:
+        stresses = np.concatenate(stresses_list, axis=0)
+        assert len(atoms_list) == stresses.shape[0]
+
+    if args.return_contributions:
+        contributions = np.concatenate(contributions_list, axis=0)
+        assert len(atoms_list) == contributions.shape[0]
+
+    # Store data in atoms objects
+    for i, (atoms, energy, forces) in enumerate(zip(atoms_list, energies, forces_list)):
+        atoms.calc = None  # crucial
+        atoms.info[args.info_prefix + "energy"] = energy
+        atoms.arrays[args.info_prefix + "forces"] = forces
+
+        if args.compute_stress:
+            atoms.info[args.info_prefix + "stress"] = stresses[i]
+
+        if args.return_contributions:
+            atoms.info[args.info_prefix + "BO_contributions"] = contributions[i]
 
     # Write atoms to output path
     ase.io.write(args.output, images=atoms_list, format="extxyz")
-
-
 
 
 if __name__ == "__main__":
