@@ -157,6 +157,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+            "RealAgnosticLocalAttentionInteractionBlock",
+            "RealAgnosticLocalAttentionResidualInteractionBlock",
         ],
     )
     parser.add_argument(
@@ -169,6 +171,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+            "RealAgnosticLocalAttentionInteractionBlock",
+            "RealAgnosticLocalAttentionResidualInteractionBlock",
         ],
     )
     parser.add_argument(

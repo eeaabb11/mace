@@ -839,6 +839,185 @@ class RealAgnosticDensityResidualInteractionBlock(InteractionBlock):
             sc,
         )  # [n_nodes, channels, (lmax + 1)**2]
 
+
+####################################################################################################
+@compile_mode("script")
+class RealAgnosticLocalAttentionInteractionBlock(InteractionBlock):
+    def _setup(self) -> None:
+        self.linear_up = o3.Linear(
+            self.node_feats_irreps,
+            self.node_feats_irreps,
+            internal_weights=True,
+            shared_weights=True,
+        )
+        # TensorProduct
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            self.target_irreps,
+        )
+        self.conv_tp = o3.TensorProduct(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+        )
+
+        # Convolution weights
+        input_dim = self.edge_feats_irreps.num_irreps
+        self.conv_tp_weights = nn.FullyConnectedNet(
+            [input_dim] + self.radial_MLP + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,
+        )
+
+        # Linear
+        irreps_mid = irreps_mid.simplify()
+        self.irreps_out = self.target_irreps
+        self.linear = o3.Linear(
+            irreps_mid, self.irreps_out, internal_weights=True, shared_weights=True
+        )
+
+        # Selector TensorProduct
+        self.skip_tp = o3.FullyConnectedTensorProduct(
+            self.irreps_out, self.node_attrs_irreps, self.irreps_out
+        )
+        self.reshape = reshape_irreps(self.irreps_out)
+
+        # === for local attention ===
+        # Attention: Query and Key Projections     #equation 5
+        self.WQ = o3.Linear(self.node_feats_irreps, self.node_feats_irreps, internal_weights=True, shared_weights=True,) # WQ
+        self.WK = o3.Linear(irreps_mid, self.node_feats_irreps, internal_weights=True, shared_weights=True,)    # WK
+
+        #self.local_atten_conv_tp = o3.ElementwiseTensorProduct(self.node_feats_irreps, self.node_feats_irreps, ["0e",])
+        self.local_atten_conv_tp = o3.FullTensorProduct(self.node_feats_irreps, self.node_feats_irreps, ["0e",])
+
+    def forward(
+        self, node_attrs: torch.Tensor, node_feats: torch.Tensor, edge_attrs: torch.Tensor,
+        edge_feats: torch.Tensor, edge_index: torch.Tensor
+    ) -> torch.Tensor:
+        
+        sender = edge_index[0]
+        receiver = edge_index[1]
+        num_nodes = node_feats.shape[0]
+        node_feats = self.linear_up(node_feats)
+        tp_weights = self.conv_tp_weights(edge_feats)
+        mji = self.conv_tp(
+            node_feats[sender], edge_attrs, tp_weights
+        )  # [n_edges, irreps]
+        # 
+
+        # evaluate key and query
+        # receiver here is number is of length n_edges and node_feats[receiver] is also of shape n_edges
+        # TODO: make it generalize to multi-head (different mu)
+        query = self.WQ(node_feats[sender])  # [n_edges, irreps]
+        key = self.WK(mji)  # [n_edges, irreps]
+        alpha_ji_num_l0 = self.local_atten_conv_tp(query, key) # [n_edges, scalers]
+        alpha_ji_num= torch.sum(alpha_ji_num_l0, dim=1)  # [n_edges, 1]
+        alpha_ji = torch.softmax(alpha_ji_num, dim=0) # [n_edges,]]
+        
+
+        # === equation 6 ===
+        mji = mji * alpha_ji.unsqueeze(-1) # Element-wise multiplication, equation 6, poolong
+        
+        # Aggregate messages
+        message = scatter_sum(mji, receiver, dim=0, dim_size=num_nodes)  #  A function , summation over all neighbors
+        message = self.linear(message) / self.avg_num_neighbors # equation 3
+        message = self.skip_tp(message, node_attrs)
+        return (
+            self.reshape(message),
+            None,
+        )  # [n_nodes, channels, (lmax + 1)**2]
+
+@compile_mode("script")
+class RealAgnosticLocalAttentionResidualInteractionBlock(InteractionBlock):
+    def _setup(self) -> None:
+        self.linear_up = o3.Linear(
+            self.node_feats_irreps,
+            self.node_feats_irreps,
+            internal_weights=True,
+            shared_weights=True,
+        )
+        # TensorProduct
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            self.target_irreps,
+        )
+        self.conv_tp = o3.TensorProduct(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+        )
+
+        # Convolution weights
+        input_dim = self.edge_feats_irreps.num_irreps
+        self.conv_tp_weights = nn.FullyConnectedNet(
+            [input_dim] + self.radial_MLP + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,  # gate
+        )
+
+        # Linear
+        irreps_mid = irreps_mid.simplify()
+        self.irreps_out = self.target_irreps
+        self.linear = o3.Linear(
+            irreps_mid, self.irreps_out, internal_weights=True, shared_weights=True
+        )
+
+        # Selector TensorProduct
+        self.skip_tp = o3.FullyConnectedTensorProduct(
+            self.node_feats_irreps, self.node_attrs_irreps, self.hidden_irreps
+        )
+        self.reshape = reshape_irreps(self.irreps_out)
+
+        # === for local attention ===
+        # Attention: Query and Key Projections     #equation 5
+        self.WQ = o3.Linear(self.node_feats_irreps, self.node_feats_irreps, internal_weights=True, shared_weights=True,) # WQ
+        self.WK = o3.Linear(irreps_mid, self.node_feats_irreps, internal_weights=True, shared_weights=True,)    # WK
+
+        #self.local_atten_conv_tp = o3.ElementwiseTensorProduct(self.node_feats_irreps, self.node_feats_irreps, ["0e",])
+        self.local_atten_conv_tp = o3.FullTensorProduct(self.node_feats_irreps, self.node_feats_irreps, ["0e",])
+
+    def forward(
+        self, node_attrs: torch.Tensor, node_feats: torch.Tensor, edge_attrs: torch.Tensor,
+        edge_feats: torch.Tensor, edge_index: torch.Tensor
+    ) -> torch.Tensor:
+
+        sender = edge_index[0]
+        receiver = edge_index[1]
+        num_nodes = node_feats.shape[0]
+        sc = self.skip_tp(node_feats, node_attrs)
+        node_feats = self.linear_up(node_feats)
+        tp_weights = self.conv_tp_weights(edge_feats)
+        mji = self.conv_tp(
+            node_feats[sender], edge_attrs, tp_weights
+        )  # [n_edges, irreps]
+
+        # evaluate key and query
+        # receiver here is number is of length n_edges and node_feats[receiver] is also of shape n_edges
+        # TODO: make it generalize to multi-head (different mu)
+        query = self.WQ(node_feats[sender])  # [n_edges, irreps]
+        key = self.WK(mji)  # [n_edges, irreps]
+        alpha_ji_num_l0 = self.local_atten_conv_tp(query, key) # [n_edges, scalers]
+        alpha_ji_num= torch.sum(alpha_ji_num_l0, dim=1)  # [n_edges, 1]
+        alpha_ji = torch.softmax(alpha_ji_num, dim=0) # [n_edges,]]
+        
+
+        # === equation 6 ===
+        mji = mji * alpha_ji.unsqueeze(-1) # Element-wise multiplication, equation 6, poolong
+        
+        # Aggregate messages
+        message = scatter_sum(mji, receiver, dim=0, dim_size=num_nodes)  #  A function , summation over all neighbors
+        message = self.linear(message) / self.avg_num_neighbors # equation 3
+        return (
+            self.reshape(message),
+            sc,
+        )  # [n_nodes, channels, (lmax + 1)**2]
+
 @compile_mode("script")
 class RealAgnosticAttResidualInteractionBlock(InteractionBlock):
     def _setup(self) -> None:
