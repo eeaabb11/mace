@@ -3,8 +3,6 @@ from typing import Callable, Dict, Optional, Type
 import torch
 
 from .blocks import (
-    AgnosticNonlinearInteractionBlock,
-    AgnosticResidualNonlinearInteractionBlock,
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
     InteractionBlock,
@@ -15,19 +13,25 @@ from .blocks import (
     NonLinearReadoutBlock,
     RadialEmbeddingBlock,
     RealAgnosticAttResidualInteractionBlock,
+    RealAgnosticDensityInteractionBlock,
+    RealAgnosticDensityResidualInteractionBlock,
     RealAgnosticInteractionBlock,
     RealAgnosticResidualInteractionBlock,
+<<<<<<< HEAD
     RealAgnosticDensityInteractionBlock,
     RealAgnosticDensityResidualInteractionBlock,
     RealAgnosticLocalAttentionInteractionBlock,
     RealAgnosticLocalAttentionResidualInteractionBlock,
     ResidualElementDependentInteractionBlock,
+=======
+>>>>>>> upstream/main
     ScaleShiftBlock,
 )
 from .loss import (
     DipoleSingleLoss,
     UniversalLoss,
     WeightedEnergyForcesDipoleLoss,
+    WeightedEnergyForcesL1L2Loss,
     WeightedEnergyForcesLoss,
     WeightedEnergyForcesStressLoss,
     WeightedEnergyForcesVirialsLoss,
@@ -35,6 +39,7 @@ from .loss import (
     WeightedHuberEnergyForcesStressLoss,
     AtomicTargetsLoss
 )
+<<<<<<< HEAD
 from .models import (
     MACE,
     AtomicDipolesMACE,
@@ -44,6 +49,9 @@ from .models import (
     ScaleShiftBOTNet,
     ScaleShiftMACE,
 )
+=======
+from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE
+>>>>>>> upstream/main
 from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
 from .symmetric_contraction import SymmetricContraction
 from .utils import (
@@ -57,9 +65,6 @@ from .utils import (
 )
 
 interaction_classes: Dict[str, Type[InteractionBlock]] = {
-    "AgnosticNonlinearInteractionBlock": AgnosticNonlinearInteractionBlock,
-    "ResidualElementDependentInteractionBlock": ResidualElementDependentInteractionBlock,
-    "AgnosticResidualNonlinearInteractionBlock": AgnosticResidualNonlinearInteractionBlock,
     "RealAgnosticResidualInteractionBlock": RealAgnosticResidualInteractionBlock,
     "RealAgnosticDensityInteractionBlock": RealAgnosticDensityInteractionBlock,
     "RealAgnosticDensityResidualInteractionBlock": RealAgnosticDensityResidualInteractionBlock,
@@ -67,6 +72,8 @@ interaction_classes: Dict[str, Type[InteractionBlock]] = {
     "RealAgnosticLocalAttentionResidualInteractionBlock": RealAgnosticLocalAttentionResidualInteractionBlock,
     "RealAgnosticAttResidualInteractionBlock": RealAgnosticAttResidualInteractionBlock,
     "RealAgnosticInteractionBlock": RealAgnosticInteractionBlock,
+    "RealAgnosticDensityInteractionBlock": RealAgnosticDensityInteractionBlock,
+    "RealAgnosticDensityResidualInteractionBlock": RealAgnosticDensityResidualInteractionBlock,
 }
 
 scaling_classes: Dict[str, Callable] = {
@@ -100,8 +107,6 @@ __all__ = [
     "GaussianBasis",
     "MACE",
     "ScaleShiftMACE",
-    "BOTNet",
-    "ScaleShiftBOTNet",
     "AtomicDipolesMACE",
     "AtomicTargetsMACE",
     "EnergyDipolesMACE",
@@ -113,7 +118,11 @@ __all__ = [
     "WeightedEnergyForcesDipoleLoss",
     "WeightedHuberEnergyForcesStressLoss",
     "UniversalLoss",
+<<<<<<< HEAD
     "AtomicTargetsLoss",
+=======
+    "WeightedEnergyForcesL1L2Loss",
+>>>>>>> upstream/main
     "SymmetricContraction",
     "interaction_classes",
     "compute_mean_std_atomic_inter_energy",

@@ -7,14 +7,26 @@ from e3nn import o3
 from mace import modules
 from mace.tools.finetuning_utils import load_foundations_elements
 from mace.tools.scripts_utils import extract_config_mace_model
+from mace.tools.utils import AtomicNumberTable
 
 
 def configure_model(
-    args, train_loader, atomic_energies, model_foundation=None, heads=None, z_table=None
+    args,
+    train_loader,
+    atomic_energies,
+    model_foundation=None,
+    heads=None,
+    z_table=None,
+    head_configs=None,
 ):
     # Selecting outputs
-    compute_virials = args.loss in ("stress", "virials", "huber", "universal")
+    compute_virials = args.loss == "virials"
+    compute_stress = args.loss in ("stress", "huber", "universal")
+
     if compute_virials:
+        args.compute_virials = True
+        args.error_table = "PerAtomRMSEstressvirials"
+    elif compute_stress:
         args.compute_stress = True
         args.error_table = "PerAtomRMSEstressvirials"
 
@@ -22,7 +34,7 @@ def configure_model(
         "energy": args.compute_energy,
         "forces": args.compute_forces,
         "virials": compute_virials,
-        "stress": args.compute_stress,
+        "stress": compute_stress,
         "dipoles": args.compute_dipole,
     }
     logging.info(
@@ -32,8 +44,31 @@ def configure_model(
 
     if args.scaling == "no_scaling":
         args.std = 1.0
+        if head_configs is not None:
+            for head_config in head_configs:
+                head_config.std = 1.0
         logging.info("No scaling selected")
+<<<<<<< HEAD
     elif (args.mean is None or args.std is None) and args.model != "AtomicDipolesMACE" and args.model != "AtomicTargetsMACE":
+=======
+
+    if (
+        head_configs is not None
+        and args.std is not None
+        and not isinstance(args.std, list)
+    ):
+        atomic_inter_scale = []
+        for head_config in head_configs:
+            if hasattr(head_config, "std") and head_config.std is not None:
+                atomic_inter_scale.append(head_config.std)
+            elif args.std is not None:
+                atomic_inter_scale.append(
+                    args.std if isinstance(args.std, float) else 1.0
+                )
+        args.std = atomic_inter_scale
+
+    elif (args.mean is None or args.std is None) and args.model != "AtomicDipolesMACE":
+>>>>>>> upstream/main
         args.mean, args.std = modules.scaling_classes[args.scaling](
             train_loader, atomic_energies
         )
@@ -49,8 +84,22 @@ def configure_model(
         logging.info("Loading FOUNDATION model")
         model_config_foundation = extract_config_mace_model(model_foundation)
         model_config_foundation["atomic_energies"] = atomic_energies
-        model_config_foundation["atomic_numbers"] = z_table.zs
-        model_config_foundation["num_elements"] = len(z_table)
+
+        if args.foundation_model_elements:
+            foundation_z_table = AtomicNumberTable(
+                [int(z) for z in model_foundation.atomic_numbers]
+            )
+            model_config_foundation["atomic_numbers"] = foundation_z_table.zs
+            model_config_foundation["num_elements"] = len(foundation_z_table)
+            z_table = foundation_z_table
+            logging.info(
+                f"Using all elements from foundation model: {foundation_z_table.zs}"
+            )
+        else:
+            model_config_foundation["atomic_numbers"] = z_table.zs
+            model_config_foundation["num_elements"] = len(z_table)
+            logging.info(f"Using filtered elements: {z_table.zs}")
+
         args.max_L = model_config_foundation["hidden_irreps"].lmax
 
         if args.model == "MACE" and model_foundation.__class__.__name__ == "MACE":
@@ -59,7 +108,6 @@ def configure_model(
             model_config_foundation["atomic_inter_shift"] = (
                 _determine_atomic_inter_shift(args.mean, heads)
             )
-
         model_config_foundation["atomic_inter_scale"] = [1.0] * len(heads)
         args.avg_num_neighbors = model_config_foundation["avg_num_neighbors"]
         args.model = "FoundationMACE"
@@ -153,15 +201,18 @@ def _build_model(
     args, model_config, model_config_foundation, heads
 ):  # pylint: disable=too-many-return-statements
     if args.model == "MACE":
+        if args.interaction_first not in [
+            "RealAgnosticInteractionBlock",
+            "RealAgnosticDensityInteractionBlock",
+        ]:
+            args.interaction_first = "RealAgnosticInteractionBlock"
         return modules.ScaleShiftMACE(
             **model_config,
             pair_repulsion=args.pair_repulsion,
             distance_transform=args.distance_transform,
             correlation=args.correlation,
             gate=modules.gate_dict[args.gate],
-            interaction_cls_first=modules.interaction_classes[
-                "RealAgnosticInteractionBlock"
-            ],
+            interaction_cls_first=modules.interaction_classes[args.interaction_first],
             MLP_irreps=o3.Irreps(args.MLP_irreps),
             atomic_inter_scale=args.std,
             atomic_inter_shift=[0.0] * len(heads),
@@ -202,21 +253,10 @@ def _build_model(
     if args.model == "FoundationMACE":
         return modules.ScaleShiftMACE(**model_config_foundation)
     if args.model == "ScaleShiftBOTNet":
-        return modules.ScaleShiftBOTNet(
-            **model_config,
-            gate=modules.gate_dict[args.gate],
-            interaction_cls_first=modules.interaction_classes[args.interaction_first],
-            MLP_irreps=o3.Irreps(args.MLP_irreps),
-            atomic_inter_scale=args.std,
-            atomic_inter_shift=args.mean,
-        )
+        # say it is deprecated
+        raise RuntimeError("ScaleShiftBOTNet is deprecated, use MACE instead")
     if args.model == "BOTNet":
-        return modules.BOTNet(
-            **model_config,
-            gate=modules.gate_dict[args.gate],
-            interaction_cls_first=modules.interaction_classes[args.interaction_first],
-            MLP_irreps=o3.Irreps(args.MLP_irreps),
-        )
+        raise RuntimeError("BOTNet is deprecated, use MACE instead")
     if args.model == "AtomicDipolesMACE":
         assert args.loss == "dipole", "Use dipole loss with AtomicDipolesMACE model"
         assert (

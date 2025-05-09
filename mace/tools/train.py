@@ -21,6 +21,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch_ema import ExponentialMovingAverage
 from torchmetrics import Metric
 
+from mace.cli.visualise_train import TrainingPlotter
+
 from . import torch_geometric
 from .checkpoint import CheckpointHandler, CheckpointState
 from .torch_tools import to_numpy
@@ -52,6 +54,7 @@ def valid_err_log(
 ):
     eval_metrics["mode"] = "eval"
     eval_metrics["epoch"] = epoch
+    eval_metrics["head"] = valid_loader_name
     logger.log(eval_metrics)
     if epoch is None:
         inintial_phrase = "Initial"
@@ -61,7 +64,7 @@ def valid_err_log(
         error_e = eval_metrics["rmse_e_per_atom"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A"
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A"
         )
     elif log_errors == "AtomicTargetsPerAtomRMSE":
         error_atom_targets = eval_metrics["rmse_atomic_target_per_atom"] * 1e3
@@ -76,7 +79,7 @@ def valid_err_log(
         error_f = eval_metrics["rmse_f"] * 1e3
         error_stress = eval_metrics["rmse_stress"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A, RMSE_stress={error_stress:8.1f} meV / A^3",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_stress={error_stress:8.2f} meV / A^3",
         )
     elif (
         log_errors == "PerAtomRMSEstressvirials"
@@ -86,7 +89,7 @@ def valid_err_log(
         error_f = eval_metrics["rmse_f"] * 1e3
         error_virials = eval_metrics["rmse_virials_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A, RMSE_virials_per_atom={error_virials:8.1f} meV",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_virials_per_atom={error_virials:8.2f} meV",
         )
     elif (
         log_errors == "PerAtomMAEstressvirials"
@@ -96,7 +99,7 @@ def valid_err_log(
         error_f = eval_metrics["mae_f"] * 1e3
         error_stress = eval_metrics["mae_stress"] * 1e3
         logging.info(
-            f"{inintial_phrase}: loss={valid_loss:8.4f}, MAE_E_per_atom={error_e:8.1f} meV, MAE_F={error_f:8.1f} meV / A, MAE_stress={error_stress:8.1f} meV / A^3"
+            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_stress={error_stress:8.2f} meV / A^3"
         )
     elif (
         log_errors == "PerAtomMAEstressvirials"
@@ -106,37 +109,37 @@ def valid_err_log(
         error_f = eval_metrics["mae_f"] * 1e3
         error_virials = eval_metrics["mae_virials"] * 1e3
         logging.info(
-            f"{inintial_phrase}: loss={valid_loss:8.4f}, MAE_E_per_atom={error_e:8.1f} meV, MAE_F={error_f:8.1f} meV / A, MAE_virials={error_virials:8.1f} meV"
+            f"{inintial_phrase}: loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_virials={error_virials:8.2f} meV"
         )
     elif log_errors == "TotalRMSE":
         error_e = eval_metrics["rmse_e"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A",
         )
     elif log_errors == "PerAtomMAE":
         error_e = eval_metrics["mae_e_per_atom"] * 1e3
         error_f = eval_metrics["mae_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, MAE_E_per_atom={error_e:8.1f} meV, MAE_F={error_f:8.1f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A",
         )
     elif log_errors == "TotalMAE":
         error_e = eval_metrics["mae_e"] * 1e3
         error_f = eval_metrics["mae_f"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, MAE_E={error_e:8.1f} meV, MAE_F={error_f:8.1f} meV / A",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A",
         )
     elif log_errors == "DipoleRMSE":
         error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_MU_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_MU_per_atom={error_mu:8.2f} mDebye",
         )
     elif log_errors == "EnergyDipoleRMSE":
         error_e = eval_metrics["rmse_e_per_atom"] * 1e3
         error_f = eval_metrics["rmse_f"] * 1e3
         error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_E_per_atom={error_e:8.1f} meV, RMSE_F={error_f:8.1f} meV / A, RMSE_Mu_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_Mu_per_atom={error_mu:8.2f} mDebye",
         )
 
 
@@ -162,6 +165,7 @@ def train(
     log_wandb: bool = False,
     distributed: bool = False,
     save_all_checkpoints: bool = False,
+    plotter: TrainingPlotter = None,
     distributed_model: Optional[DistributedDataParallel] = None,
     train_sampler: Optional[DistributedSampler] = None,
     rank: Optional[int] = 0,
@@ -184,7 +188,6 @@ def train(
     epoch = start_epoch
 
     # log validation loss before _any_ training
-    valid_loss = 0.0
     for valid_loader_name, valid_loader in valid_loaders.items():
         valid_loss_head, eval_metrics = evaluate(
             model=model,
@@ -251,7 +254,6 @@ def train(
             if "ScheduleFree" in type(optimizer).__name__:
                 optimizer.eval()
             with param_context:
-                valid_loss = 0.0
                 wandb_log_dict = {}
                 for valid_loader_name, valid_loader in valid_loaders.items():
                     valid_loss_head, eval_metrics = evaluate(
@@ -279,6 +281,11 @@ def train(
                                 ],
                                 "valid_rmse_f": eval_metrics["rmse_f"],
                             }
+                if plotter and epoch % plotter.plot_frequency == 0:
+                    try:
+                        plotter.plot(epoch, model_to_evaluate, rank)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logging.debug(f"Plotting failed: {e}")
                 valid_loss = (
                     valid_loss_head  # consider only the last head for the checkpoint
                 )
@@ -341,28 +348,59 @@ def train_one_epoch(
     ema: Optional[ExponentialMovingAverage],
     logger: MetricsLogger,
     device: torch.device,
+<<<<<<< HEAD
     distributed:bool,
+=======
+    distributed: bool,
+>>>>>>> upstream/main
     distributed_model: Optional[DistributedDataParallel] = None,
     rank: Optional[int] = 0,
 ) -> None:
     model_to_train = model if distributed_model is None else distributed_model
+<<<<<<< HEAD
     for batch in data_loader:
         train_loss_batch, opt_metrics = take_step(
+=======
+
+    if isinstance(optimizer, LBFGS):
+        _, opt_metrics = take_step_lbfgs(
+>>>>>>> upstream/main
             model=model_to_train,
             loss_fn=loss_fn,
-            batch=batch,
+            data_loader=data_loader,
             optimizer=optimizer,
             ema=ema,
             output_args=output_args,
             max_grad_norm=max_grad_norm,
             device=device,
+            distributed=distributed,
+            rank=rank,
         )
         opt_metrics["mode"] = "opt"
         opt_metrics["epoch"] = epoch
         train_loss_epoch =+ train_loss_batch
         if rank == 0:
             logger.log(opt_metrics)
+<<<<<<< HEAD
     return train_loss_epoch
+=======
+    else:
+        for batch in data_loader:
+            _, opt_metrics = take_step(
+                model=model_to_train,
+                loss_fn=loss_fn,
+                batch=batch,
+                optimizer=optimizer,
+                ema=ema,
+                output_args=output_args,
+                max_grad_norm=max_grad_norm,
+                device=device,
+            )
+            opt_metrics["mode"] = "opt"
+            opt_metrics["epoch"] = epoch
+            if rank == 0:
+                logger.log(opt_metrics)
+>>>>>>> upstream/main
 
 
 def take_step(
@@ -378,6 +416,28 @@ def take_step(
     start_time = time.time()
     batch = batch.to(device)
     batch_dict = batch.to_dict()
+<<<<<<< HEAD
+=======
+
+    def closure():
+        optimizer.zero_grad(set_to_none=True)
+        output = model(
+            batch_dict,
+            training=True,
+            compute_force=output_args["forces"],
+            compute_virials=output_args["virials"],
+            compute_stress=output_args["stress"],
+        )
+        loss = loss_fn(pred=output, ref=batch)
+        loss.backward()
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+
+        return loss
+
+    loss = closure()
+    optimizer.step()
+>>>>>>> upstream/main
 
     def closure():
         optimizer.zero_grad(set_to_none=True)
@@ -500,6 +560,102 @@ def take_step_lbfgs(
     }
 
     return loss, loss_dict
+
+def take_step_lbfgs(
+    model: torch.nn.Module,
+    loss_fn: torch.nn.Module,
+    data_loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    ema: Optional[ExponentialMovingAverage],
+    output_args: Dict[str, bool],
+    max_grad_norm: Optional[float],
+    device: torch.device,
+    distributed: bool,
+    rank: int,
+) -> Tuple[float, Dict[str, Any]]:
+    start_time = time.time()
+    logging.debug(
+        f"Max Allocated: {torch.cuda.max_memory_allocated() / 1024**2:.2f} MB"
+    )
+
+    total_sample_count = 0
+    for batch in data_loader:
+        total_sample_count += batch.num_graphs
+
+    if distributed:
+        global_sample_count = torch.tensor(total_sample_count, device=device)
+        torch.distributed.all_reduce(
+            global_sample_count, op=torch.distributed.ReduceOp.SUM
+        )
+        total_sample_count = global_sample_count.item()
+
+    signal = torch.zeros(1, device=device) if distributed else None
+
+    def closure():
+        if distributed:
+            if rank == 0:
+                signal.fill_(1)
+                torch.distributed.broadcast(signal, src=0)
+
+            for param in model.parameters():
+                torch.distributed.broadcast(param.data, src=0)
+
+        optimizer.zero_grad(set_to_none=True)
+        total_loss = torch.tensor(0.0, device=device)
+
+        # Process each batch and then collect the results we pass to the optimizer
+        for batch in data_loader:
+            batch = batch.to(device)
+            batch_dict = batch.to_dict()
+            output = model(
+                batch_dict,
+                training=True,
+                compute_force=output_args["forces"],
+                compute_virials=output_args["virials"],
+                compute_stress=output_args["stress"],
+            )
+            batch_loss = loss_fn(pred=output, ref=batch)
+            batch_loss = batch_loss * (batch.num_graphs / total_sample_count)
+
+            batch_loss.backward()
+            total_loss += batch_loss
+
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+
+        if distributed:
+            torch.distributed.all_reduce(total_loss, op=torch.distributed.ReduceOp.SUM)
+        return total_loss
+
+    if distributed:
+        if rank == 0:
+            loss = optimizer.step(closure)
+            signal.fill_(0)
+            torch.distributed.broadcast(signal, src=0)
+        else:
+            while True:
+                # Other ranks wait for signals from rank 0
+                torch.distributed.broadcast(signal, src=0)
+                if signal.item() == 0:
+                    break
+                if signal.item() == 1:
+                    loss = closure()
+
+        for param in model.parameters():
+            torch.distributed.broadcast(param.data, src=0)
+    else:
+        loss = optimizer.step(closure)
+
+    if ema is not None:
+        ema.update()
+
+    loss_dict = {
+        "loss": to_numpy(loss),
+        "time": time.time() - start_time,
+    }
+
+    return loss, loss_dict
+
 
 def evaluate(
     model: torch.nn.Module,

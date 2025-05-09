@@ -6,7 +6,7 @@
 
 import logging
 from contextlib import contextmanager
-from typing import Dict
+from typing import Dict, Union
 
 import numpy as np
 import torch
@@ -125,17 +125,29 @@ def voigt_to_matrix(t: torch.Tensor):
 def init_wandb(project: str, entity: str, name: str, config: dict, directory: str):
     import wandb
 
-    wandb.init(project=project, entity=entity, name=name, config=config, dir=directory)
+    wandb.init(
+        project=project,
+        entity=entity,
+        name=name,
+        config=config,
+        dir=directory,
+        resume="allow",
+    )
 
 
 @contextmanager
-def default_dtype(dtype: torch.dtype):
+def default_dtype(dtype: Union[torch.dtype, str]):
     """Context manager for configuring the default_dtype used by torch
 
     Args:
-        dtype (torch.dtype): the default dtype to use within this context manager
+        dtype (torch.dtype|str): the default dtype to use within this context manager
     """
     init = torch.get_default_dtype()
-    torch.set_default_dtype(dtype)
+    if isinstance(dtype, str):
+        set_default_dtype(dtype)
+    else:
+        torch.set_default_dtype(dtype)
+
     yield
+
     torch.set_default_dtype(init)

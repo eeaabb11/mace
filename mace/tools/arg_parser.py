@@ -8,6 +8,8 @@ import argparse
 import os
 from typing import Optional
 
+from .default_keys import DefaultKeys
+
 
 def build_default_arg_parser() -> argparse.ArgumentParser:
     try:
@@ -15,15 +17,18 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
 
         parser = configargparse.ArgumentParser(
             config_file_parser_class=configargparse.YAMLConfigFileParser,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
         parser.add(
             "--config",
             type=str,
             is_config_file=True,
-            help="config file to agregate options",
+            help="config file to aggregate options",
         )
     except ImportError:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
 
     # Name and seed
     parser.add_argument("--name", help="experiment name", required=True)
@@ -77,6 +82,20 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=False,
     )
     parser.add_argument("--log_level", help="log level", type=str, default="INFO")
+
+    parser.add_argument(
+        "--plot",
+        help="Plot results of training",
+        type=str2bool,
+        default=True,
+    )
+
+    parser.add_argument(
+        "--plot_frequency",
+        help="Set plotting frequency: '0' for only at the end or an integer N to plot every N epochs.",
+        type=int,
+        default="0",
+    )
 
     parser.add_argument(
         "--error_table",
@@ -157,8 +176,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+<<<<<<< HEAD
             "RealAgnosticLocalAttentionInteractionBlock",
             "RealAgnosticLocalAttentionResidualInteractionBlock",
+=======
+>>>>>>> upstream/main
         ],
     )
     parser.add_argument(
@@ -171,8 +193,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+<<<<<<< HEAD
             "RealAgnosticLocalAttentionInteractionBlock",
             "RealAgnosticLocalAttentionResidualInteractionBlock",
+=======
+>>>>>>> upstream/main
         ],
     )
     parser.add_argument(
@@ -364,6 +389,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=True,
     )
     parser.add_argument(
+        "--foundation_head",
+        help="Name of the head to use for fine-tuning",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
         "--weight_pt_head",
         help="Weight of the pretrained head in the loss function",
         type=float,
@@ -373,13 +405,25 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--num_samples_pt",
         help="Number of samples in the pretrained head",
         type=int,
-        default=1000,
+        default=10000,
+    )
+    parser.add_argument(
+        "--force_mh_ft_lr",
+        help="Force the multiheaded fine-tuning to use arg_parser lr",
+        type=str2bool,
+        default=False,
     )
     parser.add_argument(
         "--subselect_pt",
         help="Method to subselect the configurations of the pretraining set",
         choices=["fps", "random"],
         default="random",
+    )
+    parser.add_argument(
+        "--filter_type_pt",
+        help="Filtering method for collecting the pretraining set",
+        choices=["none", "combinations", "inclusive", "exclusive"],
+        default="none",
     )
     parser.add_argument(
         "--pt_train_file",
@@ -394,6 +438,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=None,
     )
     parser.add_argument(
+        "--foundation_model_elements",
+        help="Keep all elements of the foundation model during fine-tuning",
+        type=str2bool,
+        default=False,
+    )
+    parser.add_argument(
         "--keep_isolated_atoms",
         help="Keep isolated atoms in the dataset, useful for transfer learning",
         type=str2bool,
@@ -405,37 +455,49 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--energy_key",
         help="Key of reference energies in training xyz",
         type=str,
-        default="REF_energy",
+        default=DefaultKeys.ENERGY.value,
     )
     parser.add_argument(
         "--forces_key",
         help="Key of reference forces in training xyz",
         type=str,
-        default="REF_forces",
+        default=DefaultKeys.FORCES.value,
     )
     parser.add_argument(
         "--virials_key",
         help="Key of reference virials in training xyz",
         type=str,
-        default="REF_virials",
+        default=DefaultKeys.VIRIALS.value,
     )
     parser.add_argument(
         "--stress_key",
         help="Key of reference stress in training xyz",
         type=str,
-        default="REF_stress",
+        default=DefaultKeys.STRESS.value,
     )
     parser.add_argument(
         "--dipole_key",
         help="Key of reference dipoles in training xyz",
         type=str,
-        default="REF_dipole",
+        default=DefaultKeys.DIPOLE.value,
+    )
+    parser.add_argument(
+        "--head_key",
+        help="Key of head in training xyz",
+        type=str,
+        default=DefaultKeys.HEAD.value,
     )
     parser.add_argument(
         "--charges_key",
         help="Key of atomic charges in training xyz",
         type=str,
-        default="REF_charges",
+        default=DefaultKeys.CHARGES.value,
+    )
+    parser.add_argument(
+        "--skip_evaluate_heads",
+        help="Comma-separated list of heads to skip during final evaluation",
+        type=str,
+        default="pt_head",
     )
     parser.add_argument(
         "--atomic_targets_key",
@@ -486,7 +548,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "huber",
             "universal",
             "energy_forces_dipole",
+<<<<<<< HEAD
             "atomic_targets",
+=======
+            "l1l2energyforces",
+>>>>>>> upstream/main
         ],
     )
     parser.add_argument(
@@ -523,7 +589,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         dest="swa_virials_weight",
     )
     parser.add_argument(
-        "--stress_weight", help="weight of virials loss", type=float, default=1.0
+        "--stress_weight", help="weight of stress loss", type=float, default=1.0
     )
     parser.add_argument(
         "--swa_stress_weight",
@@ -696,6 +762,19 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=check_float_or_none,
         default=10.0,
     )
+    parser.add_argument(
+        "--dry_run",
+        help="Run all steps upto training to test settings.",
+        action="store_true",
+        default=False,
+    )
+    # option for cuequivariance acceleration
+    parser.add_argument(
+        "--enable_cueq",
+        help="Enable cuequivariance acceleration",
+        type=str2bool,
+        default=False,
+    )
     # options for using Weights and Biases for experiment tracking
     # to install see https://wandb.ai
     parser.add_argument(
@@ -750,7 +829,23 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
 
 
 def build_preprocess_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    try:
+        import configargparse
+
+        parser = configargparse.ArgumentParser(
+            config_file_parser_class=configargparse.YAMLConfigFileParser,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        parser.add(
+            "--config",
+            type=str,
+            is_config_file=True,
+            help="config file to aggregate options",
+        )
+    except ImportError:
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
     parser.add_argument(
         "--train_file",
         help="Training set h5 file",
@@ -810,37 +905,37 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         "--energy_key",
         help="Key of reference energies in training xyz",
         type=str,
-        default="REF_energy",
+        default=DefaultKeys.ENERGY.value,
     )
     parser.add_argument(
         "--forces_key",
         help="Key of reference forces in training xyz",
         type=str,
-        default="REF_forces",
+        default=DefaultKeys.FORCES.value,
     )
     parser.add_argument(
         "--virials_key",
         help="Key of reference virials in training xyz",
         type=str,
-        default="REF_virials",
+        default=DefaultKeys.VIRIALS.value,
     )
     parser.add_argument(
         "--stress_key",
         help="Key of reference stress in training xyz",
         type=str,
-        default="REF_stress",
+        default=DefaultKeys.STRESS.value,
     )
     parser.add_argument(
         "--dipole_key",
         help="Key of reference dipoles in training xyz",
         type=str,
-        default="REF_dipole",
+        default=DefaultKeys.DIPOLE.value,
     )
     parser.add_argument(
         "--charges_key",
         help="Key of atomic charges in training xyz",
         type=str,
-        default="REF_charges",
+        default=DefaultKeys.CHARGES.value,
     )
     parser.add_argument(
         "--atomic_targets_key",
@@ -893,6 +988,19 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Random seed for splitting training and validation sets",
         type=int,
         default=123,
+    )
+    parser.add_argument(
+        "--head_key",
+        help="Key of head in training xyz",
+        type=str,
+        default=DefaultKeys.HEAD.value,
+    )
+    parser.add_argument(
+        "--heads",
+        help="Dict of heads: containing individual files and E0s",
+        type=str,
+        default=None,
+        required=False,
     )
     return parser
 
