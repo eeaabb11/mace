@@ -16,6 +16,7 @@ from .utils import (
     save_dataset_as_HDF5,
     test_config_types,
     update_keyspec_from_kwargs,
+    compute_average_atomic_targets,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "KeySpecification",
     "update_keyspec_from_kwargs",
     "LMDBDataset",
+    "compute_average_atomic_targets",
 ]

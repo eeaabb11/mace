@@ -516,6 +516,19 @@ def get_atomic_energies(E0s, train_collection, z_table) -> dict:
         )
     return atomic_energies_dict
 
+def get_atomic_targets(train_collection, z_table) -> Tuple[Dict, float]:
+    # catch if colections.train not defined above
+    try:
+        assert train_collection is not None
+        atomic_targets_dict = data.compute_average_atomic_targets(
+            train_collection, z_table
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not compute average atomic targets if no training xyz given, error {e} occured"
+        ) from e
+    return atomic_targets_dict
+
 
 def get_avg_num_neighbors(head_configs, args, train_loader, device):
     if all(head_config.compute_avg_num_neighbors for head_config in head_configs):
@@ -552,6 +565,7 @@ def get_avg_num_neighbors(head_configs, args, train_loader, device):
 def get_loss_fn(
     args: argparse.Namespace,
     dipole_only: bool,
+    targets_only: bool,
     compute_dipole: bool,
 ) -> torch.nn.Module:
     if args.loss == "weighted":
@@ -604,6 +618,11 @@ def get_loss_fn(
             energy_weight=args.energy_weight,
             forces_weight=args.forces_weight,
             dipole_weight=args.dipole_weight,
+        )
+    elif args.loss == "atomic_targets":
+        assert dipole_only is False and targets_only is True
+        loss_fn = modules.AtomicTargetsLoss(
+            huber_delta=args.huber_delta,
         )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)

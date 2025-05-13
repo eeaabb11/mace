@@ -38,6 +38,7 @@ class AtomicData(torch_geometric.data.Data):
     virials: torch.Tensor
     dipole: torch.Tensor
     charges: torch.Tensor
+    atomic_targets: torch.Tensor
     weight: torch.Tensor
     energy_weight: torch.Tensor
     forces_weight: torch.Tensor
@@ -68,6 +69,7 @@ class AtomicData(torch_geometric.data.Data):
         virials: Optional[torch.Tensor],  # [1,3,3]
         dipole: Optional[torch.Tensor],  # [, 3]
         charges: Optional[torch.Tensor],  # [n_nodes, ]
+        atomic_targets: Optional[torch.Tensor], # [n_nodes, ]
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
@@ -92,6 +94,7 @@ class AtomicData(torch_geometric.data.Data):
         assert virials is None or virials.shape == (1, 3, 3)
         assert dipole is None or dipole.shape[-1] == 3
         assert charges is None or charges.shape == (num_nodes,)
+        assert atomic_targets is None or atomic_targets.shape == (num_nodes,)
         # Aggregate data
         data = {
             "num_nodes": num_nodes,
@@ -115,6 +118,7 @@ class AtomicData(torch_geometric.data.Data):
             "virials": virials,
             "dipole": dipole,
             "charges": charges,
+            "atomic_targets": atomic_targets,
         }
         super().__init__(**data)
 
@@ -214,6 +218,12 @@ class AtomicData(torch_geometric.data.Data):
             if config.property_weights.get("charges") is not None
             else torch.tensor(1.0, dtype=torch.get_default_dtype())
         )
+        atomic_targets_weights = (
+            torch.tensor(
+                config.property_weights.get("atomic_targets"), dtype=torch.get_default_dtype())
+            if config.property_weights.get("atomic_targets") is not None
+            else None
+        )
 
         forces = (
             torch.tensor(
@@ -261,6 +271,12 @@ class AtomicData(torch_geometric.data.Data):
             if config.properties.get("charges") is not None
             else torch.zeros(num_atoms, dtype=torch.get_default_dtype())
         )
+        atomic_targets = (
+            torch.tensor(
+                config.properties.get("atomic_targets"), dtype=torch.get_default_dtype())
+            if config.properties.get("atomic_targets") is not None
+            else None
+        )
 
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
@@ -283,6 +299,7 @@ class AtomicData(torch_geometric.data.Data):
             virials=virials,
             dipole=dipole,
             charges=charges,
+            atomic_targets=atomic_targets,
         )
 
 

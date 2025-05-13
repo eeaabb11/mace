@@ -216,6 +216,19 @@ def conditional_huber_forces(
     )
     return reduce_loss(se, ddp)
 
+# ------------------------------------------------------------------------------
+# Atomic Targets Loss Function
+# ------------------------------------------------------------------------------
+class AtomicTargetsLoss(torch.nn.Module):
+    def __init__(self, huber_delta=0.01) -> None:
+        super().__init__()
+        self.huber_loss = torch.nn.HuberLoss(reduction="mean", delta=huber_delta)
+
+    def forward(self, ref: Batch, pred: TensorDict) -> torch.Tensor:
+        return self.huber_loss(ref["atomic_targets"], pred["atomic_targets"])*1e3
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(huber_delta={self.huber_loss.delta:.3f})"
 
 # ------------------------------------------------------------------------------
 # Loss Modules Combining Multiple Quantities

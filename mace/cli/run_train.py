@@ -50,6 +50,7 @@ from mace.tools.scripts_utils import (
     dict_to_array,
     extract_config_mace_model,
     get_atomic_energies,
+    get_atomic_targets,
     get_avg_num_neighbors,
     get_config_type_weights,
     get_dataset_from_xyz,
@@ -400,10 +401,21 @@ def run(args) -> None:
         z_table = AtomicNumberTable(sorted(model_foundation.atomic_numbers.tolist()))
     logging.info(f"Atomic Numbers used: {z_table.zs}")
 
+    # Atomic targets
+    #atomic_targets_dict = {}
+    #for head_config in head_configs:
+    #    if head_config.atomic_targets_dict is None or len(head_config.atomic_targets_dict) == 0:
+    #        if check_path_ase_read(head_config.train_file):
+    #            atomic_targets_dict[head_config.head_name] = get_atomic_targets(
+    #                head_config.collections.train, head_config.z_table
+    #            )
+    #    else:
+    #        atomic_targets_dict[head_config.head_name] = head_config.atomic_targets_dict
+
     # Atomic energies
     atomic_energies_dict = {}
     for head_config in head_configs:
-        if head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0:
+        if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model != "AtomicTargetsMACE":
             assert head_config.E0s is not None, "Atomic energies must be provided"
             if all(check_path_ase_read(f) for f in head_config.train_file) and head_config.E0s.lower() != "foundation":
                 atomic_energies_dict[head_config.head_name] = get_atomic_energies(
@@ -465,13 +477,26 @@ def run(args) -> None:
     if args.model == "AtomicDipolesMACE":
         atomic_energies = None
         dipole_only = True
+        targets_only = False
         args.compute_dipole = True
         args.compute_energy = False
         args.compute_forces = False
         args.compute_virials = False
         args.compute_stress = False
+    elif args.model == "AtomicTargetsMACE":
+        args.scaling = "atomic_targets_std_scaling"
+        atomic_energies = None
+        #atomic_targets = dict_to_array(atomic_targets_dict, heads)
+        dipole_only = False
+        targets_only = True
+        args.compute_dipole = False
+        args.compute_energy = True
+        args.compute_forces = False
+        args.compute_virials = False
+        args.compute_stress = False
     else:
         dipole_only = False
+        targets_only = False
         if args.model == "EnergyDipolesMACE":
             args.compute_dipole = True
             args.compute_energy = True
@@ -485,6 +510,7 @@ def run(args) -> None:
         #     [atomic_energies_dict[z] for z in z_table.zs]
         # )
         atomic_energies = dict_to_array(atomic_energies_dict, heads)
+        # atomic_targets = None
         for head_config in head_configs:
             try:
                 logging.info(f"Atomic Energies used (z: eV) for head {head_config.head_name}: " + "{" + ", ".join([f"{z}: {atomic_energies_dict[head_config.head_name][z]}" for z in head_config.z_table.zs]) + "}")
@@ -640,7 +666,7 @@ def run(args) -> None:
             generator=torch.Generator().manual_seed(args.seed),
         )
 
-    loss_fn = get_loss_fn(args, dipole_only, args.compute_dipole)
+    loss_fn = get_loss_fn(args, dipole_only, targets_only, args.compute_dipole)
     args.avg_num_neighbors = get_avg_num_neighbors(head_configs, args, train_loader, device)
 
     # Model

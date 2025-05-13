@@ -41,6 +41,7 @@ class HeadConfig:
     train_loader: Optional[torch.utils.data.DataLoader] = None
     z_table: Optional[Any] = None
     atomic_energies_dict: Optional[Dict[str, float]] = None
+    atomic_targets_dict: Optional[Dict[str, float]] = None
 
 
 def dict_head_to_dataclass(
