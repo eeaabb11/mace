@@ -93,10 +93,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--keys",
-        help="Comma-separated list of keys to plot.",
-        default="rmse_e,rmse_f",
+        help="Comma-separated list of keys to plot (see labels).",
         type=str,
-        required=False,
+        required=True,
     )
 
     parser.add_argument(
@@ -157,12 +156,27 @@ def plot(
         "rmse_virials_per_atom": " RMSE virials/atom [meV]",
         "mae_virials": "MAE Virials [meV]",
         "rmse_mu_per_atom": "RMSE MU/atom [mDebye]",
+        "rmse_atomic_target": "RMSE Atomic Targets",
+        "mae_atomic_target": "MAE Atomic Targets",
     }
+    num_null_epochs = data["epoch"].isna().sum()
+    if num_null_epochs > 0:
+        print(f"Skipping {num_null_epochs} rows with missing 'epoch'")
 
-    data = data[data["epoch"] > min_epoch]
+    data = data[data["epoch"].notna() & (data["epoch"] > min_epoch)]
     if heads is None:
+        # data = (
+        #     data.groupby(["name", "mode", "epoch"]).agg(["mean", "std"]).reset_index()
+        # )
+
+        # TODO: This needs potenial fixing 
+        group_cols = ["name", "mode", "epoch"]
+        numeric_cols = data.select_dtypes(include="number").columns.difference(group_cols)
         data = (
-            data.groupby(["name", "mode", "epoch"]).agg(["mean", "std"]).reset_index()
+            data[group_cols + list(numeric_cols)]
+            .groupby(group_cols)
+            .agg(["mean", "std"])
+            .reset_index()
         )
 
         valid_data = data[data["mode"] == "eval"]
@@ -199,6 +213,7 @@ def plot(
             train_data["loss"]["mean"],
             color=colors[1],
             linewidth=1,
+            label="Train Loss",
         )
         ax.set_ylabel("Training Loss", color=colors[1])
         ax.set_yscale("log")
@@ -209,6 +224,7 @@ def plot(
             valid_data["loss"]["mean"],
             color=colors[0],
             linewidth=1,
+            label="Validation Loss",
         )
         ax2.set_ylabel("Validation Loss", color=colors[0])
 
@@ -323,7 +339,6 @@ def run(args: argparse.Namespace) -> None:
         for path in get_paths(args.path)
         for results in parse_training_results(path)
     )
-
     for name, group in data.groupby("name"):
         plot(
             group,

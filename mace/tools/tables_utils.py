@@ -49,7 +49,7 @@ def create_error_table(
             "RMSE F / meV / A",
             "relative F RMSE %",
         ]
-   elif table_type == "AtomicTargetsPerAtomRMSE":
+    elif table_type == "AtomicTargetsPerAtomRMSE":
         table.field_names = [
             "config_type",
             "RMSE Target / atom",
@@ -141,6 +141,14 @@ def create_error_table(
                     f"{metrics['rmse_e'] * 1000:8.1f}",
                     f"{metrics['rmse_f'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_f']:8.2f}",
+                ]
+            )
+        elif table_type == "AtomicTargetsPerAtomRMSE":
+            table.add_row(
+                [
+                    name,
+                    f"{metrics['rmse_atomic_target_per_atom'] :8.1f}", # dont need to *1000?
+                    f"{metrics['rel_rmse_atomic_target']:8.2f}",
                 ]
             )
         elif table_type == "AtomicTargetsPerAtomRMSE":

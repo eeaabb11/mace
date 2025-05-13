@@ -109,57 +109,84 @@ def run(args: argparse.Namespace) -> None:
         drop_last=False,
     )
 
-    # Collect data
-    energies_list = []
-    contributions_list = []
-    stresses_list = []
-    forces_collection = []
+    # Collect data and determine what type of outputs to look at
+    # adapted for atomic target fitting
+    sample_batch = next(iter(data_loader)).to(device)
+    sample_output = model(sample_batch.to_dict())
 
-    for batch in data_loader:
-        batch = batch.to(device)
-        output = model(batch.to_dict(), compute_stress=args.compute_stress)
-        energies_list.append(torch_tools.to_numpy(output["energy"]))
+    if "energy" in sample_output:
+        energies_list = []
+        contributions_list = []
+        stresses_list = []
+        forces_collection = []
+
+        for batch in data_loader:
+            batch = batch.to(device)
+            output = model(batch.to_dict(), compute_stress=args.compute_stress)
+            energies_list.append(torch_tools.to_numpy(output["energy"]))
+            if args.compute_stress:
+                stresses_list.append(torch_tools.to_numpy(output["stress"]))
+
+            if args.return_contributions:
+                contributions_list.append(torch_tools.to_numpy(output["contributions"]))
+
+            forces = np.split(
+                torch_tools.to_numpy(output["forces"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )
+            forces_collection.append(forces[:-1])  # drop last as its empty
+
+        energies = np.concatenate(energies_list, axis=0)
+        forces_list = [
+            forces for forces_list in forces_collection for forces in forces_list
+        ]
+        assert len(atoms_list) == len(energies) == len(forces_list)
         if args.compute_stress:
-            stresses_list.append(torch_tools.to_numpy(output["stress"]))
+            stresses = np.concatenate(stresses_list, axis=0)
+            assert len(atoms_list) == stresses.shape[0]
 
         if args.return_contributions:
-            contributions_list.append(torch_tools.to_numpy(output["contributions"]))
+            contributions = np.concatenate(contributions_list, axis=0)
+            assert len(atoms_list) == contributions.shape[0]
 
-        forces = np.split(
-            torch_tools.to_numpy(output["forces"]),
-            indices_or_sections=batch.ptr[1:],
-            axis=0,
-        )
-        forces_collection.append(forces[:-1])  # drop last as its empty
+        # Store data in atoms objects
+        for i, (atoms, energy, forces) in enumerate(zip(atoms_list, energies, forces_list)):
+            atoms.calc = None  # crucial
+            atoms.info[args.info_prefix + "energy"] = energy
+            atoms.arrays[args.info_prefix + "forces"] = forces
 
-    energies = np.concatenate(energies_list, axis=0)
-    forces_list = [
-        forces for forces_list in forces_collection for forces in forces_list
-    ]
-    assert len(atoms_list) == len(energies) == len(forces_list)
-    if args.compute_stress:
-        stresses = np.concatenate(stresses_list, axis=0)
-        assert len(atoms_list) == stresses.shape[0]
+            if args.compute_stress:
+                atoms.info[args.info_prefix + "stress"] = stresses[i]
 
-    if args.return_contributions:
-        contributions = np.concatenate(contributions_list, axis=0)
-        assert len(atoms_list) == contributions.shape[0]
+            if args.return_contributions:
+                atoms.info[args.info_prefix + "BO_contributions"] = contributions[i]
 
-    # Store data in atoms objects
-    for i, (atoms, energy, forces) in enumerate(zip(atoms_list, energies, forces_list)):
-        atoms.calc = None  # crucial
-        atoms.info[args.info_prefix + "energy"] = energy
-        atoms.arrays[args.info_prefix + "forces"] = forces
+    elif "atomic_targets" in sample_output:
+        atomic_targets_collection = []
+        for batch in data_loader:
+            batch = batch.to(device)
+            output = model(batch.to_dict())
 
-        if args.compute_stress:
-            atoms.info[args.info_prefix + "stress"] = stresses[i]
+            # Atomic Targets
+            atomic_targets = np.split(torch_tools.to_numpy(output["atomic_targets"]), indices_or_sections=batch.ptr[1:], axis=0)
+            atomic_targets_collection.append(atomic_targets[:-1])  # drop last empty if any
+        
+        atomic_targets_list = [targets for targets_list in atomic_targets_collection for targets in targets_list]
+        assert len(atoms_list) == len(atomic_targets_list)
 
-        if args.return_contributions:
-            atoms.info[args.info_prefix + "BO_contributions"] = contributions[i]
+        # Store data in atoms objects
+        for i, (atoms, atomic_targets) in enumerate(zip(atoms_list, atomic_targets_list)):
+            atoms.calc = None  # crucial
+            atoms.arrays[args.info_prefix + "atomic_targets"] = atomic_targets
+    
+    else:
+        raise RuntimeError("Model output does not contain known keys.")
 
     # Write atoms to output path
     ase.io.write(args.output, images=atoms_list, format="extxyz")
 
+    print("Evaluation Complete!")
 
 if __name__ == "__main__":
     main()

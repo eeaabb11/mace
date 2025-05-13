@@ -11,6 +11,7 @@ class DefaultKeys(Enum):
     DIPOLE = "dipole"
     HEAD = "head"
     CHARGES = "REF_charges"
+    ATOMIC_TARGETS = "REF_atomic_targets"
 
     @staticmethod
     def keydict() -> dict[str, str]:

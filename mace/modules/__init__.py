@@ -31,7 +31,7 @@ from .loss import (
     WeightedHuberEnergyForcesStressLoss,
     AtomicTargetsLoss
 )
-from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE,
+from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE
 from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
 from .symmetric_contraction import SymmetricContraction
 from .utils import (
