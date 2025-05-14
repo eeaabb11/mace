@@ -3,7 +3,7 @@
 # Authors: Ilyes Batatia, Gregor Simm, David Kovacs
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
-print("put back lbfgs - run_train.py")
+print("atomic mask verison ++++++++++++++++++++++++++")
 import argparse
 import ast
 import glob
@@ -18,7 +18,6 @@ import torch.distributed
 import torch.nn.functional
 from e3nn.util import jit
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import LBFGS
 from torch.utils.data import ConcatDataset
 from torch_ema import ExponentialMovingAverage
 
@@ -346,19 +345,18 @@ def run(args: argparse.Namespace) -> None:
     z_table = AtomicNumberTable(sorted(list(all_atomic_numbers)))
     logging.info(f"Atomic Numbers used: {z_table.zs}")
 
-    #Atomic targets
-    print("added atomic targets fn") 
-    atomic_targets_dict = {}
-    for head_config in head_configs:
-       if head_config.atomic_targets_dict is None or len(head_config.atomic_targets_dict) == 0:
-           if check_path_ase_read(head_config.train_file):
-               atomic_targets_dict[head_config.head_name] = get_atomic_targets(
-                   head_config.collections.train, head_config.z_table
-               )
-       else:
-           atomic_targets_dict[head_config.head_name] = head_config.atomic_targets_dict
+    # Atomic targets
+    #atomic_targets_dict = {}
+    #for head_config in head_configs:
+    #    if head_config.atomic_targets_dict is None or len(head_config.atomic_targets_dict) == 0:
+    #        if check_path_ase_read(head_config.train_file):
+    #            atomic_targets_dict[head_config.head_name] = get_atomic_targets(
+    #                head_config.collections.train, head_config.z_table
+    #            )
+    #    else:
+    #        atomic_targets_dict[head_config.head_name] = head_config.atomic_targets_dict
 
-    #Atomic energies
+    # Atomic energies
     atomic_energies_dict = {}
     for head_config in head_configs:
         if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model != "AtomicTargetsMACE":
@@ -503,7 +501,7 @@ def run(args: argparse.Namespace) -> None:
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=True,
-                drop_last=(not args.lbfgs),
+                drop_last=True,
                 seed=args.seed,
             )
             valid_samplers[head] = valid_sampler
@@ -512,7 +510,7 @@ def run(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
-        drop_last=(train_sampler is None and not args.lbfgs),
+        drop_last=(train_sampler is None),
         pin_memory=args.pin_memory,
         num_workers=args.num_workers,
         generator=torch.Generator().manual_seed(args.seed),
@@ -526,7 +524,7 @@ def run(args: argparse.Namespace) -> None:
             batch_size=args.valid_batch_size,
             sampler=valid_samplers[head] if args.distributed else None,
             shuffle=False,
-            drop_last=False if args.lbfgs else True,
+            drop_last=False,
             pin_memory=args.pin_memory,
             num_workers=args.num_workers,
             generator=torch.Generator().manual_seed(args.seed),
@@ -579,8 +577,6 @@ def run(args: argparse.Namespace) -> None:
     )
 
     start_epoch = 0
-    restart_lbfgs = False
-    opt_start_epoch = None
     if args.restart_latest:
         try:
             opt_start_epoch = checkpoint_handler.load_latest(
@@ -589,14 +585,11 @@ def run(args: argparse.Namespace) -> None:
                 device=device,
             )
         except Exception:  # pylint: disable=W0703
-            try:
-                opt_start_epoch = checkpoint_handler.load_latest(
-                    state=tools.CheckpointState(model, optimizer, lr_scheduler),
-                    swa=False,
-                    device=device,
-                )
-            except Exception: # pylint: disable=W0703
-                restart_lbfgs = True
+            opt_start_epoch = checkpoint_handler.load_latest(
+                state=tools.CheckpointState(model, optimizer, lr_scheduler),
+                swa=False,
+                device=device,
+            )
         if opt_start_epoch is not None:
             start_epoch = opt_start_epoch
 
@@ -606,21 +599,6 @@ def run(args: argparse.Namespace) -> None:
     else:
         for group in optimizer.param_groups:
             group["lr"] = args.lr
-
-    if args.lbfgs:
-        logging.info("Switching optimizer to LBFGS")
-        optimizer = LBFGS(model.parameters(),
-                          history_size=200,
-                          max_iter=20,
-                          line_search_fn="strong_wolfe")
-        if restart_lbfgs:
-            opt_start_epoch = checkpoint_handler.load_latest(
-                state=tools.CheckpointState(model, optimizer, lr_scheduler),
-                swa=False,
-                device=device,
-            )
-            if opt_start_epoch is not None:
-                start_epoch = opt_start_epoch
 
     if args.wandb:
         setup_wandb(args)

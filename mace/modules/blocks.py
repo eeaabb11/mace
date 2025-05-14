@@ -244,8 +244,9 @@ class EquivariantProductBasisBlock(torch.nn.Module):
         node_attrs: torch.Tensor,
     ) -> torch.Tensor:
         node_feats = self.symmetric_contractions(node_feats, node_attrs)
-        if self.use_sc and sc is not None:
-            return self.linear(node_feats) + sc
+        # if self.use_sc and sc is not None:
+        #     return self.linear(node_feats) + sc
+        #print("+++ using no sc +++")
         return self.linear(node_feats)
 
 

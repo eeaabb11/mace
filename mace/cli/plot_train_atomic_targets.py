@@ -13,7 +13,16 @@ import pandas as pd
 fig_width = 8
 fig_height = 6
 
-plt.rcParams.update({"font.size": 15})
+plt.rcParams.update({
+    "font.family": "DejaVu Serif",
+    "font.serif": ["Times New Roman"],
+    "axes.labelsize": 20,
+    "font.size": 20,
+    "legend.fontsize": 20,
+    "xtick.labelsize": 20,
+    "ytick.labelsize": 20,
+    "mathtext.fontset": "stix", 
+})
 
 colors = [
     "#1f77b4",  # muted blue
@@ -189,6 +198,8 @@ def run(args: argparse.Namespace) -> None:
 
     for name, group in data.groupby("name"):
         plot(group, min_epoch=args.min_epoch, output_path=f"{name}.pdf")
+
+print("Finished running plot_train_atomic_targets.py")
 
 
 if __name__ == "__main__":
