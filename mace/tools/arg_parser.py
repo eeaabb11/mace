@@ -489,6 +489,34 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=DefaultKeys.ATOMIC_TARGETS.value,
     )
+    # masking for atomic_targets
+    parser.add_argument(
+        "--atomic_targets_mask_key",
+        help="key of atomic target mask fitting",
+        type=str,
+        default=DefaultKeys.ATOMIC_TARGETS_MASK.value,
+    )
+
+    parser.add_argument(
+        "--atomic_targets_mask",
+        help="whether to use mask defined in xyz during fitting",
+        action="store_true",
+        default=True,
+    )
+    
+    parser.add_argument(
+        "--atomic_targets_random_mask",
+        help="whether to use random mask defined in xyz during fitting",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--atomic_targets_random_mask_ratio",
+        help="ratio for random mask for atomic targets",
+        type=float,
+        default=None,
+    )
     parser.add_argument(
         "--skip_evaluate_heads",
         help="Comma-separated list of heads to skip during final evaluation",

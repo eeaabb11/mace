@@ -622,7 +622,7 @@ def get_loss_fn(
     elif args.loss == "atomic_targets":
         assert dipole_only is False and targets_only is True
         loss_fn = modules.AtomicTargetsLoss(
-            huber_delta=args.huber_delta,
+            huber_delta=args.huber_delta, random_mask = args.atomic_targets_random_mask, random_mask_ratio = args.atomic_targets_random_mask_ratio,
         )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)

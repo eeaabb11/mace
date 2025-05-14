@@ -70,6 +70,7 @@ class AtomicData(torch_geometric.data.Data):
         dipole: Optional[torch.Tensor],  # [, 3]
         charges: Optional[torch.Tensor],  # [n_nodes, ]
         atomic_targets: Optional[torch.Tensor], # [n_nodes, ]
+        atomic_targets_mask: Optional[torch.Tensor], # [n_nodes, ]
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
@@ -95,6 +96,7 @@ class AtomicData(torch_geometric.data.Data):
         assert dipole is None or dipole.shape[-1] == 3
         assert charges is None or charges.shape == (num_nodes,)
         assert atomic_targets is None or atomic_targets.shape == (num_nodes,)
+        assert atomic_targets_mask is None or atomic_targets_mask.shape == (num_nodes, )
         # Aggregate data
         data = {
             "num_nodes": num_nodes,
@@ -119,6 +121,7 @@ class AtomicData(torch_geometric.data.Data):
             "dipole": dipole,
             "charges": charges,
             "atomic_targets": atomic_targets,
+            "atomic_targets_mask": atomic_targets_mask,
         }
         super().__init__(**data)
 
@@ -277,6 +280,12 @@ class AtomicData(torch_geometric.data.Data):
             if config.properties.get("atomic_targets") is not None
             else None
         )
+        atomic_targets_mask = (
+            torch.tensor(
+                config.properties.get("atomic_targets_mask"), dtype=torch.get_default_dtype())
+            if config.properties.get("atomic_targets_mask") is not None
+            else None
+        )
 
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
@@ -300,6 +309,7 @@ class AtomicData(torch_geometric.data.Data):
             dipole=dipole,
             charges=charges,
             atomic_targets=atomic_targets,
+            atomic_targets_mask=atomic_targets_mask,
         )
 
 
