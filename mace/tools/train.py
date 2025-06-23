@@ -67,7 +67,7 @@ def valid_err_log(
             f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A"
         )
     elif log_errors == "AtomicTargetsPerAtomRMSE":
-        error_atom_targets = eval_metrics["rmse_atomic_target_per_atom"] # * 1e3 don't need to do this?
+        error_atom_targets = eval_metrics["rmse_atomic_target_per_atom"] * 1e3 
         logging.info(
             f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, RMSE_atomic_target_per_atom={error_atom_targets:8.1f}"
         )

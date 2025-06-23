@@ -113,6 +113,13 @@ def parse_args() -> argparse.Namespace:
         type=str,
         required=False,
     )
+    parser.add_argument(
+        "--output_dir",
+        help="Directory to save output plots. If not provided, saves in current directory.",
+        default=".",
+        type=str,
+        required=False,
+    )
 
     return parser.parse_args()
 
@@ -160,8 +167,6 @@ def plot(
         "mae_atomic_target": "MAE Atomic Targets",
     }
     num_null_epochs = data["epoch"].isna().sum()
-    if num_null_epochs > 0:
-        print(f"Skipping {num_null_epochs} rows with missing 'epoch'")
 
     data = data[data["epoch"].notna() & (data["epoch"] > min_epoch)]
     if heads is None:
@@ -340,10 +345,11 @@ def run(args: argparse.Namespace) -> None:
         for results in parse_training_results(path)
     )
     for name, group in data.groupby("name"):
+        output_path = os.path.join(args.output_dir, name)
         plot(
             group,
             min_epoch=args.min_epoch,
-            output_path=name,
+            output_path=output_path,
             output_format=args.output_format,
             linear=args.linear,
             start_swa=args.start_swa,

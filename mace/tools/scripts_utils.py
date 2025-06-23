@@ -220,8 +220,8 @@ def print_git_commit():
 
 
 def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
-    if model.__class__.__name__ != "ScaleShiftMACE":
-        return {"error": "Model is not a ScaleShiftMACE model"}
+    # if model.__class__.__name__ != "ScaleShiftMACE":
+    #     return {"error": "Model is not a ScaleShiftMACE model"}
 
     def radial_to_name(radial_type):
         if radial_type == "BesselBasis":
@@ -249,7 +249,12 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         if model.num_interactions.item() > 1
         else 1
     )
-    mlp_irreps = o3.Irreps(f"{model_mlp_irreps.count((0, 1)) // len(heads)}x0e")
+    #mlp_irreps = o3.Irreps(f"{model_mlp_irreps.count((0, 1)) // len(heads)}x0e")
+    if model.num_interactions.item() > 1:
+        mlp_irreps = o3.Irreps(f"{model_mlp_irreps.count((0, 1)) // len(heads)}x0e")
+    else:
+        mlp_irreps = 1
+
     try:
         correlation = (
             len(model.products[0].symmetric_contractions.contractions[0].weights) + 1
