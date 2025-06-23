@@ -37,7 +37,8 @@ from .utils import (
 
 # pylint: disable=C0302
 
-
+# Add recurrent architecture
+print("Using recurrent architecture for MACE")
 @compile_mode("script")
 class MACE(torch.nn.Module):
     def __init__(
@@ -112,7 +113,8 @@ class MACE(torch.nn.Module):
         # Interactions and readout
         self.atomic_energies_fn = AtomicEnergiesBlock(atomic_energies)
 
-        inter = interaction_cls_first(
+        # Interaction #1 - layer 0 - (unique weights)
+        first_inter = interaction_cls_first(
             node_attrs_irreps=node_attr_irreps,
             node_feats_irreps=node_feats_irreps,
             edge_attrs_irreps=sh_irreps,
@@ -123,15 +125,15 @@ class MACE(torch.nn.Module):
             radial_MLP=radial_MLP,
             cueq_config=cueq_config,
         )
-        self.interactions = torch.nn.ModuleList([inter])
+        self.interactions = torch.nn.ModuleList([first_inter])
 
         # Use the appropriate self connection at the first layer for proper E0
         use_sc_first = False
         if "Residual" in str(interaction_cls_first):
             use_sc_first = True
 
-        node_feats_irreps_out = inter.target_irreps
-        prod = EquivariantProductBasisBlock(
+        node_feats_irreps_out = first_inter.target_irreps
+        first_prod = EquivariantProductBasisBlock(
             node_feats_irreps=node_feats_irreps_out,
             target_irreps=hidden_irreps,
             correlation=correlation[0],
@@ -139,7 +141,7 @@ class MACE(torch.nn.Module):
             use_sc=use_sc_first,
             cueq_config=cueq_config,
         )
-        self.products = torch.nn.ModuleList([prod])
+        self.products = torch.nn.ModuleList([first_prod])
 
         self.readouts = torch.nn.ModuleList()
         self.readouts.append(
@@ -148,51 +150,142 @@ class MACE(torch.nn.Module):
             )
         )
 
-        for i in range(num_interactions - 1):
-            if i == num_interactions - 2:
-                hidden_irreps_out = str(
-                    hidden_irreps[0]
-                )  # Select only scalars for last layer
-            else:
-                hidden_irreps_out = hidden_irreps
-            inter = interaction_cls(
+        # Interaction #2 - layer 1 - (non-shared unique interaction)
+        second_inter = interaction_cls(
+            node_attrs_irreps=node_attr_irreps,
+            node_feats_irreps=hidden_irreps,
+            edge_attrs_irreps=sh_irreps,
+            edge_feats_irreps=edge_feats_irreps,
+            target_irreps=interaction_irreps,
+            hidden_irreps=hidden_irreps,
+            avg_num_neighbors=avg_num_neighbors,
+            radial_MLP=radial_MLP,
+            cueq_config=cueq_config,
+        )
+        self.interactions.append(second_inter)
+        self.products.append(
+            EquivariantProductBasisBlock(
+                node_feats_irreps=interaction_irreps,
+                target_irreps=hidden_irreps,
+                correlation=correlation[1],
+                num_elements=num_elements,
+                use_sc=True,
+                cueq_config=cueq_config,
+            )
+        )
+        self.readouts.append(
+            LinearReadoutBlock(hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config)
+        )
+
+        # Shared weights layers (middle layers)
+        if num_interactions > 3:
+            shared_inter = interaction_cls(
                 node_attrs_irreps=node_attr_irreps,
                 node_feats_irreps=hidden_irreps,
                 edge_attrs_irreps=sh_irreps,
                 edge_feats_irreps=edge_feats_irreps,
                 target_irreps=interaction_irreps,
-                hidden_irreps=hidden_irreps_out,
+                hidden_irreps=hidden_irreps,
                 avg_num_neighbors=avg_num_neighbors,
                 radial_MLP=radial_MLP,
                 cueq_config=cueq_config,
             )
-            self.interactions.append(inter)
-            prod = EquivariantProductBasisBlock(
+            self.shared_inter = shared_inter
+
+            for i in range(2, num_interactions - 1):
+                self.interactions.append(shared_inter)
+                self.products.append(
+                    EquivariantProductBasisBlock(
+                        node_feats_irreps=interaction_irreps,
+                        target_irreps=hidden_irreps,
+                        correlation=correlation[i],
+                        num_elements=num_elements,
+                        use_sc=True,
+                        cueq_config=cueq_config,
+                    )
+                )
+                self.readouts.append(
+                    LinearReadoutBlock(hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config)
+                )
+        # Final layer (non-shared unique)
+        final_inter = interaction_cls(
+            node_attrs_irreps=node_attr_irreps,
+            node_feats_irreps=hidden_irreps,
+            edge_attrs_irreps=sh_irreps,
+            edge_feats_irreps=edge_feats_irreps,
+            target_irreps=interaction_irreps,
+            hidden_irreps=str(hidden_irreps[0]),
+            avg_num_neighbors=avg_num_neighbors,
+            radial_MLP=radial_MLP,
+            cueq_config=cueq_config,
+        )
+        self.interactions.append(final_inter)
+        self.products.append(
+            EquivariantProductBasisBlock(
                 node_feats_irreps=interaction_irreps,
-                target_irreps=hidden_irreps_out,
-                correlation=correlation[i + 1],
+                target_irreps=str(hidden_irreps[0]),
+                correlation=correlation[-1],
                 num_elements=num_elements,
                 use_sc=True,
                 cueq_config=cueq_config,
             )
-            self.products.append(prod)
-            if i == num_interactions - 2:
-                self.readouts.append(
-                    NonLinearReadoutBlock(
-                        hidden_irreps_out,
-                        (len(heads) * MLP_irreps).simplify(),
-                        gate,
-                        o3.Irreps(f"{len(heads)}x0e"),
-                        len(heads),
-                        cueq_config,
-                    )
-                )
-            else:
-                self.readouts.append(
-                    LinearReadoutBlock(
-                        hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
-                    )
-                )
+        )
+        self.readouts.append(
+            NonLinearReadoutBlock(
+                str(hidden_irreps[0]),
+                (len(heads) * MLP_irreps).simplify(),
+                gate,
+                o3.Irreps(f"{len(heads)}x0e"),
+                len(heads),
+                cueq_config,
+            )
+        )
+
+        # for i in range(num_interactions - 1):
+        #     if i == num_interactions - 2:
+        #         hidden_irreps_out = str(
+        #             hidden_irreps[0]
+        #         )  # Select only scalars for last layer
+        #     else:
+        #         hidden_irreps_out = hidden_irreps
+        #     inter = interaction_cls(
+        #         node_attrs_irreps=node_attr_irreps,
+        #         node_feats_irreps=hidden_irreps,
+        #         edge_attrs_irreps=sh_irreps,
+        #         edge_feats_irreps=edge_feats_irreps,
+        #         target_irreps=interaction_irreps,
+        #         hidden_irreps=hidden_irreps_out,
+        #         avg_num_neighbors=avg_num_neighbors,
+        #         radial_MLP=radial_MLP,
+        #         cueq_config=cueq_config,
+        #     )
+        #     self.interactions.append(inter)
+        #     prod = EquivariantProductBasisBlock(
+        #         node_feats_irreps=interaction_irreps,
+        #         target_irreps=hidden_irreps_out,
+        #         correlation=correlation[i + 1],
+        #         num_elements=num_elements,
+        #         use_sc=True,
+        #         cueq_config=cueq_config,
+        #     )
+        #     self.products.append(prod)
+        #     if i == num_interactions - 2:
+        #         self.readouts.append(
+        #             NonLinearReadoutBlock(
+        #                 hidden_irreps_out,
+        #                 (len(heads) * MLP_irreps).simplify(),
+        #                 gate,
+        #                 o3.Irreps(f"{len(heads)}x0e"),
+        #                 len(heads),
+        #                 cueq_config,
+        #             )
+        #         )
+        #     else:
+        #         self.readouts.append(
+        #             LinearReadoutBlock(
+        #                 hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
+        #             )
+        #         )
 
     def forward(
         self,
