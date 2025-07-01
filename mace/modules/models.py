@@ -482,6 +482,308 @@ class ScaleShiftMACE(MACE):
             "displacement": displacement,
             "node_feats": node_feats_out,
         }
+    
+@compile_mode("script")
+class VectorialMACE(torch.nn.Module):
+    def __init__(
+        self,
+        r_max: float,
+        num_bessel: int,
+        num_polynomial_cutoff: int,
+        max_ell: int,
+        v_max: List[int],
+        num_vec_radial_basis: int, 
+        max_v_ell: int,
+        interaction_cls: Type[InteractionBlock],
+        interaction_cls_first: Type[InteractionBlock],
+        contraction_cls: str,
+        contraction_cls_first: str,
+        num_interactions: int,
+        num_elements: int,
+        hidden_irreps: o3.Irreps,
+        MLP_irreps: o3.Irreps,
+        atomic_energies: np.ndarray,
+        avg_num_neighbors: float,
+        atomic_numbers: List[int],
+        correlation: Union[int, List[int]],
+        gate: Optional[Callable],
+        pair_repulsion: bool = False,
+        distance_transform: str = "None",
+        radial_MLP: Optional[List[int]] = None,
+        radial_type: Optional[str] = "bessel",
+        heads: Optional[List[str]] = None,
+        cueq_config: Optional[Dict[str, Any]] = None, 
+    ):
+        super().__init__()
+        self.register_buffer(
+            "atomic_numbers", torch.tensor(atomic_numbers, dtype=torch.int64)
+        )
+        self.register_buffer(
+            "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
+        )
+        self.register_buffer(
+            "v_max", torch.tensor(m_max, dtype=torch.get_default_dtype())
+        )
+        self.register_buffer(
+            "num_interactions", torch.tensor(num_interactions, dtype=torch.int64)
+        )
+        if heads is None:
+            heads = ["default"]
+        self.heads = heads
+        if isinstance(correlation, int):
+            correlation = [correlation] * num_interactions
+        # Embedding
+        node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
+        node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
+        self.node_embedding = LinearNodeEmbeddingBlock(
+            irreps_in=node_attr_irreps,
+            irreps_out=node_feats_irreps,
+            cueq_config=cueq_config,
+        )
+        self.radial_embedding = RadialEmbeddingBlock(
+            r_max=r_max,
+            num_bessel=num_bessel,
+            num_polynomial_cutoff=num_polynomial_cutoff,
+            radial_type=radial_type,
+            distance_transform=distance_transform,
+        )
+        edge_feats_irreps = o3.Irreps(f"{self.radial_embedding.out_dim}x0e")
+        if pair_repulsion:
+            self.pair_repulsion_fn = ZBLBasis(p=num_polynomial_cutoff)
+            self.pair_repulsion = True
+
+        sh_irreps = o3.Irreps.spherical_harmonics(max_ell)
+        num_features = hidden_irreps.count(o3.Irrep(0, 1))
+        interaction_irreps = (sh_irreps * num_features).sort()[0].simplify()
+        self.spherical_harmonics = o3.SphericalHarmonics(
+            sh_irreps, normalize=True, normalization="component"
+        )
+        if radial_MLP is None:
+            radial_MLP = [64, 64, 64]
+
+        # Interactions and readout
+        self.atomic_energies_fn = AtomicEnergiesBlock(atomic_energies)
+
+        # ----- vectorial stuff -----
+        # m_max is not used here but Chebychev is still on (-1, 1)
+        # this needs to have a specicies dependent transform
+        self.vec_radial_embedding = ChebychevBasis2(
+            r_max = 0.0,
+            num_basis=num_vec_radial_basis,
+        )
+
+        vec_sh_irreps = o3.Irreps.spherical_harmonics(max_v_ell)
+
+        self.vec_spherical_harmonics = o3.SphericalHarmonics(
+            vec_sh_irreps, normalize=True, normalization="component"
+        )
+
+        # ---- interaction and product basis modules ----
+        inter = interaction_cls_first(
+            node_attrs_irreps=node_attr_irreps,
+            node_feats_irreps=node_feats_irreps,
+            edge_attrs_irreps=sh_irreps,
+            edge_feats_irreps=edge_feats_irreps,
+            target_irreps=interaction_irreps,
+            hidden_irreps=hidden_irreps,
+            avg_num_neighbors=avg_num_neighbors,
+            radial_MLP=radial_MLP,
+            cueq_config=cueq_config,
+            vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+            vec_node_attrs_irreps=vec_sh_irreps
+        )
+        self.interactions = torch.nn.ModuleList([inter])
+
+        # Use the appropriate self connection at the first layer for proper E0
+        use_sc_first = False
+        if "Residual" in str(interaction_cls_first):
+            use_sc_first = True
+
+        node_feats_irreps_out = inter.target_irreps
+
+        if "SelfVec" not in self.__class__.__name__:
+            prod = EquivariantProductBasisBlock(
+                node_feats_irreps=node_feats_irreps_out,
+                target_irreps=hidden_irreps,
+                correlation=correlation[0],
+                num_elements=num_elements,
+                use_sc=use_sc_first,
+                cueq_config=cueq_config,
+                contraction_cls=contraction_cls_first
+            )
+            vec_prod = EquivariantProductBasisBlock(
+                node_feats_irreps=node_feats_irreps_out,
+                target_irreps=hidden_irreps,
+                correlation=correlation[0],
+                num_elements=num_elements,
+                use_sc=use_sc_first,
+                cueq_config=cueq_config,
+                contraction_cls=contraction_cls_first)
+            
+        else:
+            if "OneBody" not in self.__class__.__name__:
+                prod_block_cls = EquivariantProductBasisWithSelfvecBlock
+            else:
+                if "Readout" in self.__class__.__name__ or "Ginzburg" in self.__class__.__name__:
+                    prod_block_cls = EquivariantProductBasisWithSelfvecBlock
+                else:
+                    prod_block_cls = EquivariantProductBasisWithOneBodySelfMagmomBlock
+            prod = prod_block_cls(
+                node_feats_irreps=node_feats_irreps_out,
+                target_irreps=hidden_irreps,
+                # assume only a single correlation
+                correlation=correlation[0],
+                use_sc=use_sc_first,
+                num_elements=len(self.atomic_numbers),
+                cueq_config=cueq_config,
+                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+            )
+            vec_prod = prod_block_cls(
+                node_feats_irreps=node_feats_irreps_out,
+                target_irreps=hidden_irreps,
+                # assume only a single correlation
+                correlation=correlation[0],
+                use_sc=use_sc_first,
+                num_elements=len(self.atomic_numbers),
+                cueq_config=cueq_config,
+                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+                )
+            
+        self.products = torch.nn.ModuleList([prod])
+        self.vec_products = torch.nn.ModuleList([vec_prod])
+
+        self.readouts = torch.nn.ModuleList()
+        self.readouts.append(
+            LinearReadoutBlock(
+                hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
+            )
+        )
+
+        self.vec_readouts = torch.nn.ModuleList()
+        self.vec_readouts.append(
+            LinearReadoutBlock(
+                hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
+            )
+        )
+
+        for i in range(num_interactions - 1):
+            if i == num_interactions - 2:
+                hidden_irreps_out = str(
+                    hidden_irreps[0]
+                )  # Select only scalars for last layer
+            else:
+                hidden_irreps_out = hidden_irreps
+            inter = interaction_cls(
+                node_attrs_irreps=node_attr_irreps,
+                node_feats_irreps=hidden_irreps,
+                edge_attrs_irreps=sh_irreps,
+                edge_feats_irreps=edge_feats_irreps,
+                target_irreps=interaction_irreps,
+                hidden_irreps=hidden_irreps_out,
+                avg_num_neighbors=avg_num_neighbors,
+                radial_MLP=radial_MLP,
+                cueq_config=cueq_config,
+                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                vec_node_attrs_irreps=vec_sh_irreps
+            )
+            self.interactions.append(inter)
+
+            if "Selfvec" not in self.__class__.__name__:
+                prod = EquivariantProductBasisBlock(
+                    node_feats_irreps=interaction_irreps,
+                    target_irreps=hidden_irreps_out,
+                    correlation=correlation[i + 1],
+                    num_elements=num_elements,
+                    use_sc=True,
+                    cueq_config=cueq_config,
+                    contraction_cls=contraction_cls
+                )
+                vec_prod = EquivariantProductBasisBlock(
+                    node_feats_irreps=interaction_irreps,
+                    target_irreps=hidden_irreps_out,
+                    correlation=correlation[i + 1],
+                    num_elements=num_elements,
+                    use_sc=True,
+                    cueq_config=cueq_config,
+                    contraction_cls=contraction_cls
+                )
+            else:
+                prod = EquivariantProductBasisWithSelfvecBlock(
+                    node_feats_irreps=interaction_irreps,
+                    target_irreps=hidden_irreps_out,
+                    # assume only a single correlation
+                    correlation=correlation[i + 1],
+                    num_elements=num_elements,
+                    use_sc = True,
+                    cueq_config=prod.cueq_config,
+                    contraction_cls=contraction_cls,
+                    vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                    vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+                )
+                vec_prod = EquivariantProductBasisWithSelfvecBlock(
+                    node_feats_irreps=interaction_irreps,
+                    target_irreps=hidden_irreps_out,
+                    # assume only a single correlation
+                    correlation=correlation[i + 1],
+                    num_elements=num_elements,
+                    use_sc = True,
+                    cueq_config=prod.cueq_config,
+                    contraction_cls=contraction_cls,
+                    vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                    vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+                )
+
+            self.products.append(prod)
+            self.vec_products.append(vec_prod)
+            
+            if i == num_interactions - 2:
+                self.readouts.append(
+                    NonLinearReadoutBlock(
+                        hidden_irreps_out,
+                        (len(heads) * MLP_irreps).simplify(),
+                        gate,
+                        o3.Irreps(f"{len(heads)}x0e"),
+                        len(heads),
+                        cueq_config,
+                    )
+                )
+                self.vec_readouts.append(
+                    NonLinearReadoutBlock(
+                        hidden_irreps_out,
+                        (len(heads) * MLP_irreps).simplify(),
+                        gate,
+                        o3.Irreps(f"{len(heads)}x0e"),
+                        len(heads),
+                        cueq_config,
+                    )
+                )
+            else:
+                self.readouts.append(
+                    LinearReadoutBlock(
+                        hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
+                    )
+                )
+                self.vec_readouts.append(
+                    LinearReadoutBlock(
+                        hidden_irreps, o3.Irreps(f"{len(heads)}x0e"), cueq_config
+                    )
+                )
+
+    @abstractmethod
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        raise NotImplementedError
+
 
 @compile_mode("script")
 class AtomicTargetsMACE(MACE):
