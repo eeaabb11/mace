@@ -522,7 +522,7 @@ class VectorialMACE(torch.nn.Module):
             "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
         )
         self.register_buffer(
-            "v_max", torch.tensor(m_max, dtype=torch.get_default_dtype())
+            "v_max", torch.tensor(v_max, dtype=torch.get_default_dtype())
         )
         self.register_buffer(
             "num_interactions", torch.tensor(num_interactions, dtype=torch.int64)
@@ -560,12 +560,11 @@ class VectorialMACE(torch.nn.Module):
         )
         if radial_MLP is None:
             radial_MLP = [64, 64, 64]
-
         # Interactions and readout
         self.atomic_energies_fn = AtomicEnergiesBlock(atomic_energies)
 
-        # ----- vectorial stuff -----
-        # m_max is not used here but Chebychev is still on (-1, 1)
+        # --- vectorial stuffs ---
+        # v_max is not used here but Chebychev is still on (-1, 1)
         # this needs to have a specicies dependent transform
         self.vec_radial_embedding = ChebychevBasis2(
             r_max = 0.0,
@@ -573,12 +572,12 @@ class VectorialMACE(torch.nn.Module):
         )
 
         vec_sh_irreps = o3.Irreps.spherical_harmonics(max_v_ell)
-
+        
         self.vec_spherical_harmonics = o3.SphericalHarmonics(
             vec_sh_irreps, normalize=True, normalization="component"
         )
-
-        # ---- interaction and product basis modules ----
+    
+        # --- interaction and product basis modules ---
         inter = interaction_cls_first(
             node_attrs_irreps=node_attr_irreps,
             node_feats_irreps=node_feats_irreps,
@@ -601,6 +600,8 @@ class VectorialMACE(torch.nn.Module):
 
         node_feats_irreps_out = inter.target_irreps
 
+        
+        
         if "SelfVec" not in self.__class__.__name__:
             prod = EquivariantProductBasisBlock(
                 node_feats_irreps=node_feats_irreps_out,
@@ -619,15 +620,14 @@ class VectorialMACE(torch.nn.Module):
                 use_sc=use_sc_first,
                 cueq_config=cueq_config,
                 contraction_cls=contraction_cls_first)
-            
         else:
             if "OneBody" not in self.__class__.__name__:
-                prod_block_cls = EquivariantProductBasisWithSelfvecBlock
+                prod_block_cls = EquivariantProductBasisWithSelfVecBlock
             else:
                 if "Readout" in self.__class__.__name__ or "Ginzburg" in self.__class__.__name__:
-                    prod_block_cls = EquivariantProductBasisWithSelfvecBlock
+                    prod_block_cls = EquivariantProductBasisWithSelfVecBlock
                 else:
-                    prod_block_cls = EquivariantProductBasisWithOneBodySelfMagmomBlock
+                    prod_block_cls = EquivariantProductBasisWithOneBodySelfVecBlock
             prod = prod_block_cls(
                 node_feats_irreps=node_feats_irreps_out,
                 target_irreps=hidden_irreps,
@@ -649,8 +649,8 @@ class VectorialMACE(torch.nn.Module):
                 cueq_config=cueq_config,
                 vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
                 vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
-                )
-            
+            )
+
         self.products = torch.nn.ModuleList([prod])
         self.vec_products = torch.nn.ModuleList([vec_prod])
 
@@ -690,7 +690,7 @@ class VectorialMACE(torch.nn.Module):
             )
             self.interactions.append(inter)
 
-            if "Selfvec" not in self.__class__.__name__:
+            if "SelfVec" not in self.__class__.__name__:
                 prod = EquivariantProductBasisBlock(
                     node_feats_irreps=interaction_irreps,
                     target_irreps=hidden_irreps_out,
@@ -710,7 +710,7 @@ class VectorialMACE(torch.nn.Module):
                     contraction_cls=contraction_cls
                 )
             else:
-                prod = EquivariantProductBasisWithSelfvecBlock(
+                prod = EquivariantProductBasisWithSelfVecBlock(
                     node_feats_irreps=interaction_irreps,
                     target_irreps=hidden_irreps_out,
                     # assume only a single correlation
@@ -722,7 +722,7 @@ class VectorialMACE(torch.nn.Module):
                     vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
                     vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
                 )
-                vec_prod = EquivariantProductBasisWithSelfvecBlock(
+                vec_prod = EquivariantProductBasisWithSelfVecBlock(
                     node_feats_irreps=interaction_irreps,
                     target_irreps=hidden_irreps_out,
                     # assume only a single correlation
@@ -784,6 +784,392 @@ class VectorialMACE(torch.nn.Module):
     ) -> Dict[str, Optional[torch.Tensor]]:
         raise NotImplementedError
 
+@compile_mode("script")
+class VectorialScaleShiftMACE(VectorialMACE):
+    def __init__(
+        self,
+        atomic_inter_scale: float,
+        atomic_inter_shift: float,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.scale_shift = ScaleShiftBlock(
+            scale=atomic_inter_scale, shift=atomic_inter_shift
+        )
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_vecforces: bool = True,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # Setup
+        data["positions"].requires_grad_(True)
+        data["node_attrs"].requires_grad_(True)
+        data["vec"].requires_grad_(True)
+        
+        num_graphs = data["ptr"].numel() - 1
+        num_atoms_arange = torch.arange(data["positions"].shape[0])
+        node_heads = (
+            data["head"][data["batch"]]
+            if "head" in data
+            else torch.zeros_like(data["batch"])
+        )
+        displacement = torch.zeros(
+            (num_graphs, 3, 3),
+            dtype=data["positions"].dtype,
+            device=data["positions"].device,
+        )
+        if compute_virials or compute_stress or compute_displacement:
+            (
+                data["positions"],
+                data["shifts"],
+                displacement,
+            ) = get_symmetric_displacement(
+                positions=data["positions"],
+                unit_shifts=data["unit_shifts"],
+                cell=data["cell"],
+                edge_index=data["edge_index"],
+                num_graphs=num_graphs,
+                batch=data["batch"],
+            )
+
+        # Atomic energies
+        node_e0 = self.atomic_energies_fn(data["node_attrs"])[
+            num_atoms_arange, node_heads
+        ]
+        e0 = scatter_sum(
+            src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
+        )  # [n_graphs, num_heads]
+
+        # node embedding on species
+        node_feats = self.node_embedding(data["node_attrs"])
+
+        # prepare the Rnl and Ylm
+        vectors, lengths = get_edge_vectors_and_lengths(
+            positions=data["positions"],
+            edge_index=data["edge_index"],
+            shifts=data["shifts"],
+        )
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(
+            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+        )
+        if hasattr(self, "pair_repulsion"):
+            pair_node_energy = self.pair_repulsion_fn(
+                lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+            )
+        else:
+            pair_node_energy = torch.zeros_like(node_e0)
+
+        # --- vectorial stuffs ---
+        
+        vec_lengths = torch.norm(data["vec"], dim=-1, keepdim=True)
+        element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
+        element_dependent_scaling.requires_grad_(True)
+        element_dependent_scaling.retain_grad()
+        
+        vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
+        vec_vectors = data["vec"] / (vec_lengths + 1e-9)
+        
+        # Compute the spherical harmonics from the normalized vectors
+        vec_node_attrs_raw = self.vec_spherical_harmonics(vec_vectors)
+
+        # Replace output with 1 when the vecnitude is 0, preserving gradient flow
+        is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
+        vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
+
+        #
+        vec_node_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_atoms, n_basis)
+        
+        # Interactions
+        node_es_list = [pair_node_energy]
+        node_feats_list = []
+        vec_node_feats_list = []
+        for interaction, product, vec_product, readout in zip(
+            self.interactions, self.products, self.vec_products, self.readouts
+        ):
+            #print("before interaction, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+            node_feats, vec_node_feats, sc, vec_sc = interaction(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+                vec_node_inv_feats=vec_node_feats,
+                vec_node_attrs=vec_node_attrs
+            )
+            #print("after interaction, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+            node_feats = product(
+                node_feats=node_feats, sc=sc,node_attrs=data["node_attrs"]
+            )
+            
+            vec_node_feats = vec_product(
+                node_feats=vec_node_feats, sc=vec_sc,node_attrs=data["node_attrs"]
+            )
+            #print("after product, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+            node_feats_list.append(node_feats)
+            vec_node_feats_list.append(vec_node_feats)
+            node_es_list.append(
+                readout(node_feats + vec_node_feats, node_heads)[num_atoms_arange, node_heads]
+            )  # {[n_nodes, ], }
+            #print("vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+
+        # Concatenate node features
+        node_feats_out = torch.cat(node_feats_list, dim=-1)
+        # Sum over interactions
+        node_inter_es = torch.sum(
+            torch.stack(node_es_list, dim=0), dim=0
+        )  # [n_nodes, ]
+        node_inter_es = self.scale_shift(node_inter_es, node_heads)
+
+        # Sum over nodes in graph
+        inter_e = scatter_sum(
+            src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
+        )  # [n_graphs,]
+        
+        # Add E_0 and (scaled) interaction energy
+        total_energy = e0 + inter_e
+        node_energy = node_e0 + node_inter_es
+        forces, virials, stress, hessian, vecforces = get_outputs(
+            energy=inter_e,
+            positions=data["positions"],
+            displacement=displacement,
+            cell=data["cell"],
+            vecs=data["vec"],
+            training=training,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_hessian=compute_hessian,
+            compute_vecforces=compute_vecforces,
+        )
+        output = {
+            "energy": total_energy,
+            "node_energy": node_energy,
+            "interaction_energy": inter_e,
+            "forces": forces,
+            "vecforces": vecforces,
+            "virials": virials,
+            "stress": stress,
+            "hessian": hessian,
+            "displacement": displacement,
+            "node_feats": node_feats_out,
+        }
+        return output
+    
+# need this pytorch version pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+import sphericart.torch
+class SHModule(torch.nn.Module):
+    """Example of how to use SphericalHarmonics from within a
+    `torch.nn.Module`"""
+
+    def __init__(self, l_max):
+        super().__init__()
+        self.SH = sphericart.torch.SolidHarmonics(l_max)
+        # normalization that is consistent with e3nn spherical harmonics "component"
+        #self.register_buffer('scaling', torch.tensor(np.sqrt(4 * np.pi)))
+
+    def forward(self, xyz):
+        sh = self.SH(torch.index_select(
+                xyz, 1, torch.tensor([2, 0, 1], dtype=torch.long,device=xyz.device)
+            ))
+        return sh
+    
+@compile_mode("script")
+class VectorialSolidHarmonicsScaleShiftMACE(VectorialMACE):
+    def __init__(
+        self,
+        atomic_inter_scale: float,
+        atomic_inter_shift: float,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.scale_shift = ScaleShiftBlock(
+            scale=atomic_inter_scale, shift=atomic_inter_shift
+        )
+
+        # modify spherical to solid harmonics for vectorial
+        self.vec_solid_harmoics = SHModule(self.vec_spherical_harmonics._lmax)
+        self.vec_spherical_harmonics = None
+        self.vec_readouts = None
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_vecforces: bool = True,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # Setup
+        data["positions"].requires_grad_(True)
+        data["node_attrs"].requires_grad_(True)
+        data["vec"].requires_grad_(True)
+        
+        num_graphs = data["ptr"].numel() - 1
+        num_atoms_arange = torch.arange(data["positions"].shape[0])
+        node_heads = (
+            data["head"][data["batch"]]
+            if "head" in data
+            else torch.zeros_like(data["batch"])
+        )
+        displacement = torch.zeros(
+            (num_graphs, 3, 3),
+            dtype=data["positions"].dtype,
+            device=data["positions"].device,
+        )
+        if compute_virials or compute_stress or compute_displacement:
+            (
+                data["positions"],
+                data["shifts"],
+                displacement,
+            ) = get_symmetric_displacement(
+                positions=data["positions"],
+                unit_shifts=data["unit_shifts"],
+                cell=data["cell"],
+                edge_index=data["edge_index"],
+                num_graphs=num_graphs,
+                batch=data["batch"],
+            )
+
+        # Atomic energies
+        node_e0 = self.atomic_energies_fn(data["node_attrs"])[
+            num_atoms_arange, node_heads
+        ]
+        e0 = scatter_sum(
+            src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
+        )  # [n_graphs, num_heads]
+
+        # node embedding on species
+        node_feats = self.node_embedding(data["node_attrs"])
+
+        # prepare the Rnl and Ylm
+        vectors, lengths = get_edge_vectors_and_lengths(
+            positions=data["positions"],
+            edge_index=data["edge_index"],
+            shifts=data["shifts"],
+        )
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(
+            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+        )
+        if hasattr(self, "pair_repulsion"):
+            pair_node_energy = self.pair_repulsion_fn(
+                lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+            )
+        else:
+            pair_node_energy = torch.zeros_like(node_e0)
+
+        # --- vectorial stuffs ---
+        
+        vec_lengths = torch.norm(data["vec"], dim=-1, keepdim=True)
+        element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
+        element_dependent_scaling.requires_grad_(True)
+        element_dependent_scaling.retain_grad()
+        
+        vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
+        vec_vectors = data["vec"] / (vec_lengths + 1e-9)
+        
+        # Compute the spherical harmonics from the normalized vectors
+        vec_node_attrs = self.vec_solid_harmoics(data["vec"])
+
+
+        #
+        vec_node_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_atoms, n_basis)
+        
+        # Interactions
+        node_es_list = [pair_node_energy]
+        node_feats_list = []
+        vec_node_feats_list = []
+        for interaction, product, vec_product, readout in zip(
+            self.interactions, self.products, self.vec_products, self.readouts
+        ):
+            #print("before interaction, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+            node_feats, vec_node_feats, sc, vec_sc = interaction(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+                vec_node_inv_feats=vec_node_feats,
+                vec_node_attrs=vec_node_attrs
+            )
+            #print("after interaction, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+            node_feats = product(
+                node_feats=node_feats, sc=sc,node_attrs=data["node_attrs"]
+            )
+            
+            vec_node_feats = vec_product(
+                node_feats=vec_node_feats, sc=vec_sc,node_attrs=data["node_attrs"]
+            )
+            #print("after product, vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+            node_feats_list.append(node_feats)
+            vec_node_feats_list.append(vec_node_feats)
+            node_es_list.append(
+                readout(node_feats + vec_node_feats, node_heads)[num_atoms_arange, node_heads]
+            )  # {[n_nodes, ], }
+            #print("vec_node_feats.requires_grad", vec_node_feats.requires_grad)
+
+
+        # Concatenate node features
+        node_feats_out = torch.cat(node_feats_list, dim=-1)
+        node_feats_out_vec = torch.cat(vec_node_feats_list, dim=-1)
+
+        # Sum over interactions
+        node_inter_es = torch.sum(
+            torch.stack(node_es_list, dim=0), dim=0
+        )  # [n_nodes, ]
+        node_inter_es = self.scale_shift(node_inter_es, node_heads)
+
+        # Sum over nodes in graph
+        inter_e = scatter_sum(
+            src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
+        )  # [n_graphs,]
+        
+        # Add E_0 and (scaled) interaction energy
+        total_energy = e0 + inter_e
+        node_energy = node_e0 + node_inter_es
+        forces, virials, stress, hessian, vecforces = get_outputs(
+            energy=inter_e,
+            positions=data["positions"],
+            displacement=displacement,
+            cell=data["cell"],
+            vecs=data["vec"],
+            training=training,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_hessian=compute_hessian,
+            compute_vecforces=compute_vecforces,
+        )
+        output = {
+            "energy": total_energy,
+            "node_energy": node_energy,
+            "interaction_energy": inter_e,
+            "forces": forces,
+            "vecforces": vecforces,
+            "virials": virials,
+            "stress": stress,
+            "hessian": hessian,
+            "displacement": displacement,
+            "node_feats": node_feats_out,
+            "node_feats_out_vec": node_feats_out_vec,
+        }
+        return output
 
 @compile_mode("script")
 class AtomicTargetsMACE(MACE):
