@@ -302,7 +302,256 @@ class EquivariantProductBasisBlock(torch.nn.Module):
         if self.use_sc and sc is not None:
             return self.linear(node_feats) + sc
         return self.linear(node_feats)
+    
+@compile_mode("script")
+class EquivariantProductBasisWithSelfVectorialBlock(torch.nn.Module):
+    def __init__(
+        self,
+        node_feats_irreps: o3.Irreps,
+        target_irreps: o3.Irreps,
+        vec_node_inv_feats_irreps: o3.Irreps,
+        vec_node_attrs_irreps: o3.Irreps,
+        correlation: int,
+        use_sc: bool = True,
+        num_elements: Optional[int] = None,
+        cueq_config: Optional[CuEquivarianceConfig] = None,
+        contraction_cls: Optional[str] = "SymmetricContraction"
+    ) -> None:
+        super().__init__()
 
+        self.use_sc = use_sc
+        self.vec_node_inv_feats_irreps = vec_node_inv_feats_irreps
+        self.vec_node_attrs_irreps = vec_node_attrs_irreps
+        self.cueq_config = cueq_config
+        self.contraction_cls = contraction_cls
+        
+        if contraction_cls == "SymmetricContraction":
+            self.symmetric_contractions = SymmetricContractionWrapper(
+                irreps_in=node_feats_irreps,
+                irreps_out=target_irreps,
+                correlation=correlation,
+                num_elements=num_elements,
+                cueq_config=cueq_config,
+            )
+        else:
+            raise ValueError("Contraction class not supported")
+
+        # interaction with self vecnetic moment
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            o3.Irreps(str(target_irreps)),
+            self.vec_node_attrs_irreps,
+            o3.Irreps(str(target_irreps)),
+        )
+        self.conv_tp = TensorProduct(
+            o3.Irreps(str(target_irreps)),
+            self.vec_node_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+            cueq_config=self.cueq_config,
+        )
+        vec_input_dim = self.vec_node_inv_feats_irreps.num_irreps
+        self.conv_tp_weights =  nn.FullyConnectedNet(
+            [vec_input_dim] + [64, 64, 64] + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,
+        )
+        
+        # Update linear
+        self.linear = Linear(
+            self.conv_tp.irreps_out,
+            o3.Irreps(str(target_irreps)),
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=cueq_config,
+        )
+        self.linear_ori = Linear(
+            o3.Irreps(str(target_irreps)),
+            o3.Irreps(str(target_irreps)),
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=cueq_config,
+        )
+    def forward(
+        self,
+        node_feats: torch.Tensor,
+        sc: Optional[torch.Tensor],
+        node_attrs: torch.Tensor,
+        vec_node_inv_feats: torch.Tensor,
+        vec_node_attrs: torch.Tensor,
+    ) -> torch.Tensor:
+        use_cueq = False
+        use_cueq_mul_ir = False
+        if hasattr(self, "cueq_config"):
+            if self.cueq_config is not None:
+                if self.cueq_config.enabled and (
+                    self.cueq_config.optimize_all or self.cueq_config.optimize_symmetric
+                ):
+                    use_cueq = True
+                if self.cueq_config.layout_str == "mul_ir":
+                    use_cueq_mul_ir = True
+        if use_cueq:
+            if use_cueq_mul_ir:
+                node_feats = torch.transpose(node_feats, 1, 2)
+            index_attrs = torch.nonzero(node_attrs)[:, 1].int()
+            node_feats = self.symmetric_contractions(
+                node_feats.flatten(1),
+                index_attrs,
+            )
+        else:
+            node_feats = self.symmetric_contractions(node_feats, node_attrs)
+
+        # interaction with vecnectic moment
+        tp_weights = self.conv_tp_weights(vec_node_inv_feats)
+        # print("vec_node_inv_feats: ", vec_node_inv_feats)
+        # print("tp_weights:", tp_weights)
+        out = self.conv_tp(node_feats, vec_node_attrs, tp_weights)
+        # print("node_feats:", node_feats)
+        # print("vec_node_attrs:", vec_node_attrs)
+        # print("out: ", out)
+        # print(torch.norm(self.linear(out)))
+        # print(torch.norm(self.linear_ori(node_feats)))
+        # out = node_feats
+        if self.use_sc and sc is not None:
+            out_message = self.linear(out) + self.linear_ori(node_feats) + sc
+        else:
+            out_message = self.linear(out) + self.linear_ori(node_feats)
+        return out_message
+
+@compile_mode("script")
+class EquivariantProductBasisWithOneBodySelfVectorialBlock(torch.nn.Module):
+    def __init__(
+        self,
+        node_feats_irreps: o3.Irreps,
+        target_irreps: o3.Irreps,
+        vec_node_inv_feats_irreps: o3.Irreps,
+        vec_node_attrs_irreps: o3.Irreps,
+        correlation: int,
+        use_sc: bool = True,
+        num_elements: Optional[int] = None,
+        cueq_config: Optional[CuEquivarianceConfig] = None,
+        contraction_cls: Optional[str] = "SymmetricContraction"
+    ) -> None:
+        super().__init__()
+
+        self.use_sc = use_sc
+        self.vec_node_inv_feats_irreps = vec_node_inv_feats_irreps
+        self.vec_node_attrs_irreps = vec_node_attrs_irreps
+        self.cueq_config = cueq_config
+        self.contraction_cls = contraction_cls
+        
+        if contraction_cls == "SymmetricContraction":
+            self.symmetric_contractions = SymmetricContractionWrapper(
+                irreps_in=node_feats_irreps,
+                irreps_out=target_irreps,
+                correlation=correlation,
+                num_elements=num_elements,
+                cueq_config=cueq_config,
+            )
+        else:
+            raise ValueError("Contraction class not supported")
+
+        # interaction with self vecnetic moment
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            target_irreps,
+            self.vec_node_attrs_irreps,
+            target_irreps,
+        )
+        self.conv_tp = TensorProduct(
+            target_irreps,
+            self.vec_node_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+            cueq_config=self.cueq_config,
+        )
+        vec_input_dim = self.vec_node_inv_feats_irreps.num_irreps
+        self.conv_tp_weights =  nn.FullyConnectedNet(
+            [vec_input_dim] + [64, 64, 64] + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,
+        )
+
+        # get invariant dimension
+        self.onebody_vecbasis = nn.FullyConnectedNet(
+            [vec_input_dim] + [64, 64, 64] + [target_irreps[0].mul],
+            torch.nn.functional.silu,
+        )
+        # TODO: add this for (1 - exp(-alpha * x))
+        # self.species_dependent_transform = Linear(
+            
+        # )
+        self.exp_scaling = torch.nn.Parameter(torch.tensor(5.0, requires_grad=True))
+
+        # Update linear
+        self.linear = Linear(
+            self.conv_tp.irreps_out,
+            target_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=cueq_config,
+        )
+        self.linear_ori = Linear(
+            target_irreps,
+            target_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=cueq_config,
+        )
+
+    def forward(
+        self,
+        node_feats: torch.Tensor,
+        sc: Optional[torch.Tensor],
+        node_attrs: torch.Tensor,
+        vec_node_inv_feats: torch.Tensor,
+        vec_node_attrs: torch.Tensor,
+        vec_lenghts: torch.Tensor,
+    ) -> torch.Tensor:
+        use_cueq = False
+        use_cueq_mul_ir = False
+        if hasattr(self, "cueq_config"):
+            if self.cueq_config is not None:
+                if self.cueq_config.enabled and (
+                    self.cueq_config.optimize_all or self.cueq_config.optimize_symmetric
+                ):
+                    use_cueq = True
+                if self.cueq_config.layout_str == "mul_ir":
+                    use_cueq_mul_ir = True
+        if use_cueq:
+            if use_cueq_mul_ir:
+                node_feats = torch.transpose(node_feats, 1, 2)
+            index_attrs = torch.nonzero(node_attrs)[:, 1].int()
+            node_feats = self.symmetric_contractions(
+                node_feats.flatten(1),
+                index_attrs,
+            )
+        else:
+            node_feats = self.symmetric_contractions(node_feats, node_attrs)
+
+
+        # interaction with vecnectic moment
+        tp_weights = self.conv_tp_weights(vec_node_inv_feats)
+
+        out = self.conv_tp(node_feats, vec_node_attrs, tp_weights)
+
+        # add self vec one body contribution for large volume limit
+        # invariant dimension
+
+        if len(out.shape) == 2:
+            out += (1 - torch.exp(-self.exp_scaling * vec_lenghts)) * self.onebody_vecbasis(vec_node_inv_feats)
+        else:
+            out[:, :, 0] += vec_lenghts.unsqueeze(-1) * self.onebody_vecbasis(vec_node_inv_feats)
+
+        # print(torch.norm(self.linear(out)))
+        # print(torch.norm(self.linear_ori(node_feats)))
+        # print(torch.norm(sc))
+        # out = node_feats
+        if self.use_sc and sc is not None:
+            out_message = self.linear(out) + self.linear_ori(node_feats) + sc
+        else:
+            out_message = self.linear(out) + self.linear_ori(node_feats)
+        return out_message
 
 @compile_mode("script")
 class InteractionBlock(torch.nn.Module):
@@ -375,6 +624,36 @@ class InteractionBlock(torch.nn.Module):
 
 nonlinearities = {1: torch.nn.functional.silu, -1: torch.tanh}
 
+@compile_mode("script")
+class VectorialInteractionBlock(InteractionBlock):
+    def __init__(
+        self,
+        vec_node_inv_feats_irreps: Optional[o3.Irreps] = None,
+        vec_node_attrs_irreps: Optional[o3.Irreps] = None,
+        **kwargs,
+    ) -> None:
+        self.vec_node_inv_feats_irreps = vec_node_inv_feats_irreps
+        self.vec_node_attrs_irreps = vec_node_attrs_irreps
+        super().__init__(**kwargs)
+
+    @abstractmethod
+    def _setup(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def forward(
+        self,
+        node_attrs: torch.Tensor,
+        node_feats: torch.Tensor,
+        edge_attrs: torch.Tensor,
+        edge_feats: torch.Tensor,
+        edge_index: torch.Tensor,
+        vec_node_inv_feats: Optional[torch.Tensor] = None,
+        vec_node_attrs: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        raise NotImplementedError
+
+nonlinearities = {1: torch.nn.functional.silu, -1: torch.tanh}
 
 @compile_mode("script")
 class RealAgnosticInteractionBlock(InteractionBlock):
@@ -670,6 +949,175 @@ class RealAgnosticDensityInteractionBlock(InteractionBlock):
         message = self.skip_tp(message, node_attrs)
         return (
             self.reshape(message),
+            None,
+        )  # [n_nodes, channels, (lmax + 1)**2]
+    
+
+@compile_mode("script")
+class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
+    def _setup(self) -> None:
+        if not hasattr(self, "cueq_config"):
+            self.cueq_config = None
+        # First linear
+        self.linear_up = Linear(
+            self.node_feats_irreps,
+            self.node_feats_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+        # TensorProduct for real space
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            self.target_irreps,
+        )
+        self.conv_tp = TensorProduct(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+            cueq_config=self.cueq_config,
+        )
+
+        # TensorProduct in magnetic moment space
+        vec_irreps_mid, vec_instructions = tp_out_irreps_with_instructions(
+            self.node_feats_irreps,
+            self.vec_node_attrs_irreps,
+            self.target_irreps,
+        )
+        self.vec_conv_tp = TensorProduct(
+            self.node_feats_irreps,
+            self.vec_node_attrs_irreps,
+            vec_irreps_mid,
+            instructions=vec_instructions,
+            shared_weights=False,
+            internal_weights=False,
+            cueq_config=self.cueq_config,
+        )
+        
+        # Convolution weights 
+        # fix later
+        input_dim = self.edge_feats_irreps.num_irreps
+        vec_input_dim = self.vec_node_inv_feats_irreps.num_irreps
+        self.conv_tp_weights = nn.FullyConnectedNet(
+            [input_dim + vec_input_dim] + self.radial_MLP + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,
+        )
+        # transforming from radial l channels to magnetic l channels
+        self.conv_tp_weights_vec_trans = nn.FullyConnectedNet(
+            [self.conv_tp.weight_numel, ] + [self.vec_conv_tp.weight_numel, ]
+        )
+
+        # Linear
+        self.irreps_out = self.target_irreps
+        self.linear = Linear(
+            irreps_mid,
+            self.irreps_out,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+
+        self.vec_linear = Linear(
+            vec_irreps_mid,
+            self.irreps_out,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+
+        # Selector TensorProduct
+        self.skip_tp = FullyConnectedTensorProduct(
+            self.irreps_out,
+            self.node_attrs_irreps,
+            self.irreps_out,
+            cueq_config=self.cueq_config,
+        )
+
+        self.vec_skip_tp = FullyConnectedTensorProduct(
+            self.irreps_out,
+            self.node_attrs_irreps,
+            self.irreps_out,
+            cueq_config=self.cueq_config,
+        )
+
+        # Density normalization
+        self.density_fn = nn.FullyConnectedNet(
+            [input_dim]
+            + [
+                1,
+            ],
+            torch.nn.functional.silu,
+        )
+        # Reshape
+        self.reshape = reshape_irreps(self.irreps_out, cueq_config=self.cueq_config)
+
+    def forward(
+        self,
+        node_attrs: torch.Tensor,
+        node_feats: torch.Tensor,
+        edge_attrs: torch.Tensor,
+        edge_feats: torch.Tensor, # (n_edges, n_basis)
+        edge_index: torch.Tensor,
+        vec_node_inv_feats: torch.Tensor,
+        vec_node_attrs: torch.Tensor
+    ) -> Tuple[torch.Tensor, None]:
+        sender = edge_index[0]
+        receiver = edge_index[1]
+        
+        num_nodes = node_feats.shape[0]
+        node_feats = self.linear_up(node_feats)
+
+        # boardcast node feats to number of nodes
+        vec_inv_feats_j = vec_node_inv_feats[sender]
+        
+        edge_feats_with_vec = torch.cat([edge_feats, vec_inv_feats_j], dim=-1)
+
+        # combined learnable radial
+        tp_weights = self.conv_tp_weights(edge_feats_with_vec)
+
+        # density normalization
+        edge_density = torch.tanh(self.density_fn(edge_feats) ** 2)
+
+        mji = self.conv_tp(
+            node_feats[sender], edge_attrs, tp_weights
+        )  # [n_edges, irreps]
+
+        if hasattr(self, "conv_tp_weights_vec_trans"):
+            tp_weights_vec = self.conv_tp_weights_vec_trans(tp_weights)
+        else:
+            tp_weights_vec = tp_weights
+        vec_mji = self.vec_conv_tp(
+            node_feats[sender], vec_node_attrs[sender], tp_weights_vec
+        )  # [n_edges, irreps]
+        
+        density = scatter_sum(
+            src=edge_density, index=receiver, dim=0, dim_size=num_nodes
+        )  # [n_nodes, 1]
+
+        # highlighted message for central message
+
+        message = scatter_sum(
+            src=mji, index=receiver, dim=0, dim_size=num_nodes
+        )  # [n_nodes, irreps]
+        
+        vec_message = scatter_sum(
+            src=vec_mji, index=receiver, dim = 0, dim_size=num_nodes,
+        )
+        
+        message = self.linear(message) / (density + 1)
+        message = self.skip_tp(message, node_attrs)
+        # not doing density normalization for now
+        vec_message = self.vec_linear(vec_message) / self.avg_num_neighbors
+        vec_message = self.vec_skip_tp(vec_message, node_attrs)
+
+        return (
+            self.reshape(message),
+            self.reshape(vec_message),
+            None,
             None,
         )  # [n_nodes, channels, (lmax + 1)**2]
 

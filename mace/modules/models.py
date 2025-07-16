@@ -4,6 +4,7 @@
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
 
+from abc import abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import numpy as np
@@ -17,6 +18,8 @@ from mace.tools.scatter import scatter_sum
 from .blocks import (
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
+    EquivariantProductBasisWithSelfVectorialBlock,
+    EquivariantProductBasisWithOneBodySelfVectorialBlock,
     InteractionBlock,
     LinearDipoleReadoutBlock,
     LinearNodeEmbeddingBlock,
@@ -25,6 +28,10 @@ from .blocks import (
     NonLinearReadoutBlock,
     RadialEmbeddingBlock,
     ScaleShiftBlock,
+)
+from .radial import (
+    ChebychevBasis,
+    ChebychevBasis2,
 )
 from .utils import (
     compute_fixed_charge_dipole,
@@ -81,37 +88,66 @@ class MACE(torch.nn.Module):
         if isinstance(correlation, int):
             correlation = [correlation] * num_interactions
         self.lammps_mliap = lammps_mliap
-        # Embedding
+
+        # ---- EMBEDDING -----
+
+        # -- k-channel dependancy --
+        #One-hot atom identity
+        # ex) num_elements = 2 then -> node_attr_irreps = 2xOe
+        #Since you have num_elements = 2, you likely have two types of atoms (say, H and O), and each atom gets a one-hot encoding into a 2D vector
+        #This lives in 2x0e space — two scalar channels with no geometric transformation.
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
+
+        #Scalar embedding space for atoms
+        # ex) max_L=2 , channels=16, gives you hidden_irreps = 16x0e + 16x1o + 16x2e
+        #hidden_irreps.count(o3.Irrep(0, 1)), (0, 1)) -> counts the number of scalar channels in hidden_irreps
+        # ex) hidden_irreps = 16x0e + 16x1o + 16x2e then -> node_feats_irreps = 16x0e
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
+
+        # Node embedding: h_i,k00 = sum_z W_kz * Delta_zzi
+        #This maps each input node attribute vector (e.g. one-hot [1, 0])
+        # to a richer vector of hidden scalar features (e.g. [0.5, -1.2, ..., 0.3] of length 16)
         self.node_embedding = LinearNodeEmbeddingBlock(
-            irreps_in=node_attr_irreps,
-            irreps_out=node_feats_irreps,
+            irreps_in=node_attr_irreps,  # e.g. 2x0e
+            irreps_out=node_feats_irreps, # e.g. 16x0e
             cueq_config=cueq_config,
-        )
+        ) # output: [n_nodes, k=16]
+
+        # -- embedding the lengths and directions of edges --
+        # Radial embedding
         self.radial_embedding = RadialEmbeddingBlock(
             r_max=r_max,
             num_bessel=num_bessel,
             num_polynomial_cutoff=num_polynomial_cutoff,
             radial_type=radial_type,
             distance_transform=distance_transform,
-        )
-        edge_feats_irreps = o3.Irreps(f"{self.radial_embedding.out_dim}x0e")
+        ) # output:[n_edges, num_bessel=8]
+
+        # Edge features irreps
+        edge_feats_irreps = o3.Irreps(f"{self.radial_embedding.out_dim}x0e") # "num_besselx0e" or "8x0e"
         if pair_repulsion:
             self.pair_repulsion_fn = ZBLBasis(p=num_polynomial_cutoff)
             self.pair_repulsion = True
 
+        # Angular embedding (Ylm's)
+        # This generates the irreps for spherical harmonics up to angular momentum max_ell
+        # ex) max_ell=2 then -> 1x0e+1x1o+1x2e
         sh_irreps = o3.Irreps.spherical_harmonics(max_ell)
-        num_features = hidden_irreps.count(o3.Irrep(0, 1))
+        # This counts how many scalar (0e) channels are in your hidden_irreps
+        num_features = hidden_irreps.count(o3.Irrep(0, 1)) # output: num_channels = 16
+        # This creates the irreps for the interaction channels
         interaction_irreps = (sh_irreps * num_features).sort()[0].simplify()
+        #Ylm's 
         self.spherical_harmonics = o3.SphericalHarmonics(
             sh_irreps, normalize=True, normalization="component"
-        )
+        ) #[n_edges, sh_irreps.dim]
+        
         if radial_MLP is None:
             radial_MLP = [64, 64, 64]
         # Interactions and readout
         self.atomic_energies_fn = AtomicEnergiesBlock(atomic_energies)
 
+        # 
         inter = interaction_cls_first(
             node_attrs_irreps=node_attr_irreps,
             node_feats_irreps=node_feats_irreps,
@@ -235,7 +271,8 @@ class MACE(torch.nn.Module):
         e0 = scatter_sum(
             src=node_e0, index=data["batch"], dim=0, dim_size=num_graphs
         )  # [n_graphs, n_heads]
-        # Embeddings
+
+        # --- Embeddings ---
         node_feats = self.node_embedding(data["node_attrs"])
         edge_attrs = self.spherical_harmonics(vectors)
         edge_feats = self.radial_embedding(
@@ -622,12 +659,12 @@ class VectorialMACE(torch.nn.Module):
                 contraction_cls=contraction_cls_first)
         else:
             if "OneBody" not in self.__class__.__name__:
-                prod_block_cls = EquivariantProductBasisWithSelfVecBlock
+                prod_block_cls = EquivariantProductBasisWithSelfVectorialBlock
             else:
                 if "Readout" in self.__class__.__name__ or "Ginzburg" in self.__class__.__name__:
-                    prod_block_cls = EquivariantProductBasisWithSelfVecBlock
+                    prod_block_cls = EquivariantProductBasisWithSelfVectorialBlock
                 else:
-                    prod_block_cls = EquivariantProductBasisWithOneBodySelfVecBlock
+                    prod_block_cls = EquivariantProductBasisWithOneBodySelfVectorialBlock
             prod = prod_block_cls(
                 node_feats_irreps=node_feats_irreps_out,
                 target_irreps=hidden_irreps,
@@ -710,7 +747,7 @@ class VectorialMACE(torch.nn.Module):
                     contraction_cls=contraction_cls
                 )
             else:
-                prod = EquivariantProductBasisWithSelfVecBlock(
+                prod = EquivariantProductBasisWithSelfVectorialBlock(
                     node_feats_irreps=interaction_irreps,
                     target_irreps=hidden_irreps_out,
                     # assume only a single correlation
@@ -722,7 +759,7 @@ class VectorialMACE(torch.nn.Module):
                     vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
                     vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
                 )
-                vec_prod = EquivariantProductBasisWithSelfVecBlock(
+                vec_prod = EquivariantProductBasisWithSelfVectorialBlock(
                     node_feats_irreps=interaction_irreps,
                     target_irreps=hidden_irreps_out,
                     # assume only a single correlation
@@ -1253,7 +1290,120 @@ class AtomicTargetsMACE(MACE):
             "atomic_targets": node_energy,
             "node_feats": node_feats_out,
         }
+        return output
+    
+@compile_mode("script")
+class AtomicTargetsVectorialMACE(VectorialMACE):
+    def __init__(
+        self,
+        atomic_inter_scale: float,
+        atomic_inter_shift: float,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.scale_shift = ScaleShiftBlock(
+            scale=atomic_inter_scale, shift=atomic_inter_shift
+        )
 
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_vecforces: bool = False
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # Setup
+        data["positions"].requires_grad_(True)
+        data["node_attrs"].requires_grad_(True)
+        data["vec"].requires_grad(True)
+
+        num_graphs = data["ptr"].numel() - 1
+        num_atoms_arange = torch.arange(data["positions"].shape[0])
+        node_heads = (
+                 data["head"][data["batch"]]
+                 if "head" in data
+                 else torch.zeros_like(data["batch"])
+             )
+
+
+        # -- Embeddings --
+        # node embedding on species
+        node_feats = self.node_embedding(data["node_attrs"])
+
+        # prepare the Rnl and Ylm
+        vectors, lengths = get_edge_vectors_and_lengths(
+            positions=data["positions"],
+            edge_index=data["edge_index"],
+            shifts=data["shifts"],
+        )
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(
+            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+        )
+            # --- vectorial stuffs ---
+        vec_lengths = torch.norm(data["vec"], dim=-1, keepdim=True)
+        element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
+        element_dependent_scaling.requires_grad_(True)
+        element_dependent_scaling.retain_grad()
+
+        vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
+        vec_vectors = data["vec"] / (vec_lengths + 1e-9)
+
+        # Compute the spherical harmonics from the normalized vectors
+        vec_node_attrs_raw = self.vec_spherical_harmonics(vec_vectors)  
+        # Replace output with 1 when the magnitude is 0, preserving gradient flow
+        is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
+        vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
+
+        #
+        vec_node_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_atoms, n_basis)
+
+        # -- Interactions --
+        node_es_list = []
+        node_feats_list = []
+        vec_node_feats_list = []
+        for interaction, product, vec_product, readout in zip(
+            self.interactions, self.products, self.vec_products, self.readouts
+        ):
+            node_feats, vec_node_feats, sc, vec_sc = interaction(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+                vec_node_inv_feats=vec_node_feats,
+                vec_node_attrs=vec_node_attrs
+            )
+            node_feats = product(
+                node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
+            )
+            vec_node_feats = vec_product(
+                node_feats=vec_node_feats, sc=vec_sc, node_attrs=data["node_attrs"]
+            )
+            node_feats_list.append(node_feats)
+            vec_node_feats_list.append(vec_node_feats)
+            node_es_list.append(
+                readout(node_feats, node_heads)[num_atoms_arange, node_heads]
+            )  # {[n_nodes, ], }
+
+        # Concatenate node features
+        node_feats_out = torch.cat(node_feats_list, dim=-1)
+        # Sum over interactions
+        node_inter_es = torch.sum(
+            torch.stack(node_es_list, dim=0), dim=0
+        )  # [n_nodes, ]
+        node_inter_es = self.scale_shift(node_inter_es, node_heads)
+
+        # Add E_0 and (scaled) interaction energy
+        node_energy = node_inter_es
+        output = {
+            "atomic_targets": node_energy,
+            "node_feats": node_feats_out,
+        }
         return output
 
 

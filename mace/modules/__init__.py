@@ -5,6 +5,7 @@ import torch
 from .blocks import (
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
+    EquivariantProductBasisWithSelfVectorialBlock,
     InteractionBlock,
     LinearDipoleReadoutBlock,
     LinearNodeEmbeddingBlock,
@@ -15,6 +16,7 @@ from .blocks import (
     RealAgnosticAttResidualInteractionBlock,
     RealAgnosticDensityInteractionBlock,
     RealAgnosticDensityResidualInteractionBlock,
+    VectorialRealAgnosticDensityInteractionBlock,
     RealAgnosticInteractionBlock,
     RealAgnosticResidualInteractionBlock,
     ScaleShiftBlock,
@@ -50,6 +52,7 @@ interaction_classes: Dict[str, Type[InteractionBlock]] = {
     "RealAgnosticInteractionBlock": RealAgnosticInteractionBlock,
     "RealAgnosticDensityInteractionBlock": RealAgnosticDensityInteractionBlock,
     "RealAgnosticDensityResidualInteractionBlock": RealAgnosticDensityResidualInteractionBlock,
+    "VectorialRealAgnosticDensityInteractionBlock": VectorialRealAgnosticDensityInteractionBlock,
 }
 
 scaling_classes: Dict[str, Callable] = {
@@ -73,6 +76,7 @@ __all__ = [
     "LinearNodeEmbeddingBlock",
     "LinearReadoutBlock",
     "EquivariantProductBasisBlock",
+    "EquivariantProductBasisWithSelfVectorialBlock",
     "ScaleShiftBlock",
     "LinearDipoleReadoutBlock",
     "NonLinearDipoleReadoutBlock",
@@ -85,6 +89,7 @@ __all__ = [
     "ScaleShiftMACE",
     "AtomicDipolesMACE",
     "AtomicTargetsMACE",
+    "AtomicTargetsVectorialMACE",
     "EnergyDipolesMACE",
     "WeightedEnergyForcesLoss",
     "WeightedForcesLoss",

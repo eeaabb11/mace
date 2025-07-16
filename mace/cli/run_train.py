@@ -415,7 +415,7 @@ def run(args) -> None:
     # Atomic energies
     atomic_energies_dict = {}
     for head_config in head_configs:
-        if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model != "AtomicTargetsMACE":
+        if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model not in ["AtomicTargetsMACE", "AtomicTargetsVectorialMACE"]:
             assert head_config.E0s is not None, "Atomic energies must be provided"
             if all(check_path_ase_read(f) for f in head_config.train_file) and head_config.E0s.lower() != "foundation":
                 atomic_energies_dict[head_config.head_name] = get_atomic_energies(
@@ -484,6 +484,17 @@ def run(args) -> None:
         args.compute_virials = False
         args.compute_stress = False
     elif args.model == "AtomicTargetsMACE":
+        args.scaling = "atomic_targets_std_scaling"
+        atomic_energies = None
+        #atomic_targets = dict_to_array(atomic_targets_dict, heads)
+        dipole_only = False
+        targets_only = True
+        args.compute_dipole = False
+        args.compute_energy = True
+        args.compute_forces = False
+        args.compute_virials = False
+        args.compute_stress = False
+    elif args.model == "AtomicTargetsVectorialMACE":
         args.scaling = "atomic_targets_std_scaling"
         atomic_energies = None
         #atomic_targets = dict_to_array(atomic_targets_dict, heads)

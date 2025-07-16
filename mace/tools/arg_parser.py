@@ -124,11 +124,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         choices=[
             "BOTNet",
             "MACE",
+            "VectorialMACE",
             "ScaleShiftMACE",
+            "ScaleShiftVectorialMACE",
             "ScaleShiftBOTNet",
             "AtomicDipolesMACE",
             "EnergyDipolesMACE",
             "AtomicTargetsMACE",
+            "AtomicTargetsVectorialMACE",
         ],
     )
     parser.add_argument(
@@ -176,6 +179,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+            "VectorialRealAgnosticDensityInteractionBlock",
         ],
     )
     parser.add_argument(
@@ -188,6 +192,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
             "RealAgnosticDensityResidualInteractionBlock",
+            "VectorialRealAgnosticDensityInteractionBlock",
         ],
     )
     parser.add_argument(
