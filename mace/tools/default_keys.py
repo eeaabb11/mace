@@ -12,7 +12,8 @@ class DefaultKeys(Enum):
     HEAD = "head"
     CHARGES = "REF_charges"
     ATOMIC_TARGETS = "REF_atomic_targets"
-    ATOMIC_TARGETS_MASK = "REF_atomic_targets_mask"
+    ATOMIC_TARGETS_MASK = "REF_atomic_targets_mask",
+    VECS = "REF_vecs"
 
     @staticmethod
     def keydict() -> dict[str, str]:

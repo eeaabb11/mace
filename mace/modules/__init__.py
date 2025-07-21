@@ -5,7 +5,7 @@ import torch
 from .blocks import (
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
-    EquivariantProductBasisWithSelfVectorialBlock,
+    EquivariantProductBasisWithSelfVecBlock,
     InteractionBlock,
     LinearDipoleReadoutBlock,
     LinearNodeEmbeddingBlock,
@@ -33,7 +33,7 @@ from .loss import (
     WeightedHuberEnergyForcesStressLoss,
     AtomicTargetsLoss
 )
-from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE
+from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE, VectorialAtomicTargetsSolidHarmonicsSelfVecMACE
 from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
 from .symmetric_contraction import SymmetricContraction
 from .utils import (
@@ -76,7 +76,7 @@ __all__ = [
     "LinearNodeEmbeddingBlock",
     "LinearReadoutBlock",
     "EquivariantProductBasisBlock",
-    "EquivariantProductBasisWithSelfVectorialBlock",
+    "EquivariantProductBasisWithSelfVecBlock",
     "ScaleShiftBlock",
     "LinearDipoleReadoutBlock",
     "NonLinearDipoleReadoutBlock",
@@ -89,7 +89,7 @@ __all__ = [
     "ScaleShiftMACE",
     "AtomicDipolesMACE",
     "AtomicTargetsMACE",
-    "AtomicTargetsVectorialMACE",
+    "VectorialAtomicTargetsSolidHarmonicsSelfVecMACE",
     "EnergyDipolesMACE",
     "WeightedEnergyForcesLoss",
     "WeightedForcesLoss",

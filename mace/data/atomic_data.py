@@ -36,6 +36,7 @@ class AtomicData(torch_geometric.data.Data):
     energy: torch.Tensor
     stress: torch.Tensor
     virials: torch.Tensor
+    vecs: torch.Tensor
     dipole: torch.Tensor
     charges: torch.Tensor
     atomic_targets: torch.Tensor
@@ -46,6 +47,7 @@ class AtomicData(torch_geometric.data.Data):
     virials_weight: torch.Tensor
     dipole_weight: torch.Tensor
     charges_weight: torch.Tensor
+    vecs_weight: torch.Tensor
 
     def __init__(
         self,
@@ -63,6 +65,7 @@ class AtomicData(torch_geometric.data.Data):
         virials_weight: Optional[torch.Tensor],  # [,]
         dipole_weight: Optional[torch.Tensor],  # [,]
         charges_weight: Optional[torch.Tensor],  # [,]
+        vecs_weight: Optional[torch.Tensor], # [,]
         forces: Optional[torch.Tensor],  # [n_nodes, 3]
         energy: Optional[torch.Tensor],  # [, ]
         stress: Optional[torch.Tensor],  # [1,3,3]
@@ -71,6 +74,7 @@ class AtomicData(torch_geometric.data.Data):
         charges: Optional[torch.Tensor],  # [n_nodes, ]
         atomic_targets: Optional[torch.Tensor], # [n_nodes, ]
         atomic_targets_mask: Optional[torch.Tensor], # [n_nodes, ]
+        vecs: Optional[torch.Tensor], # [n_nodes, 3]
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
@@ -88,6 +92,7 @@ class AtomicData(torch_geometric.data.Data):
         assert virials_weight is None or len(virials_weight.shape) == 0
         assert dipole_weight is None or dipole_weight.shape == (1, 3), dipole_weight
         assert charges_weight is None or len(charges_weight.shape) == 0
+        assert vecs_weight is None or len(vecs_weight.shape) == 0
         assert cell is None or cell.shape == (3, 3)
         assert forces is None or forces.shape == (num_nodes, 3)
         assert energy is None or len(energy.shape) == 0
@@ -97,6 +102,7 @@ class AtomicData(torch_geometric.data.Data):
         assert charges is None or charges.shape == (num_nodes,)
         assert atomic_targets is None or atomic_targets.shape == (num_nodes,)
         assert atomic_targets_mask is None or atomic_targets_mask.shape == (num_nodes, )
+
         # Aggregate data
         data = {
             "num_nodes": num_nodes,
@@ -114,6 +120,7 @@ class AtomicData(torch_geometric.data.Data):
             "virials_weight": virials_weight,
             "dipole_weight": dipole_weight,
             "charges_weight": charges_weight,
+            "vecs_weights": vecs_weight,
             "forces": forces,
             "energy": energy,
             "stress": stress,
@@ -122,6 +129,7 @@ class AtomicData(torch_geometric.data.Data):
             "charges": charges,
             "atomic_targets": atomic_targets,
             "atomic_targets_mask": atomic_targets_mask,
+            "vecs": vecs,
         }
         super().__init__(**data)
 
@@ -227,6 +235,13 @@ class AtomicData(torch_geometric.data.Data):
             if config.property_weights.get("atomic_targets") is not None
             else None
         )
+        vecs_weight = (
+            torch.tensor(
+                config.property_weights.get("vecs"), dtype=torch.get_default_dtype()
+            )
+            if config.property_weights.get("vecs") is not None
+            else torch.zeros(num_atoms, 3, dtype=torch.get_default_dtype())
+        )
 
         forces = (
             torch.tensor(
@@ -286,6 +301,13 @@ class AtomicData(torch_geometric.data.Data):
             if config.properties.get("atomic_targets_mask") is not None
             else None
         )
+        vecs = (
+            torch.tensor(
+                config.properties.get("vecs"), dtype=torch.get_default_dtype()
+            )
+            if config.properties.get("vecs") is not None
+            else None
+        )
 
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
@@ -302,6 +324,7 @@ class AtomicData(torch_geometric.data.Data):
             virials_weight=virials_weight,
             dipole_weight=dipole_weight,
             charges_weight=charges_weight,
+            vecs_weight=vecs_weight,
             forces=forces,
             energy=energy,
             stress=stress,
@@ -310,6 +333,7 @@ class AtomicData(torch_geometric.data.Data):
             charges=charges,
             atomic_targets=atomic_targets,
             atomic_targets_mask=atomic_targets_mask,
+            vecs=vecs,
         )
 
 

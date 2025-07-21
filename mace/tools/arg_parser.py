@@ -126,12 +126,11 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "MACE",
             "VectorialMACE",
             "ScaleShiftMACE",
-            "ScaleShiftVectorialMACE",
             "ScaleShiftBOTNet",
             "AtomicDipolesMACE",
             "EnergyDipolesMACE",
             "AtomicTargetsMACE",
-            "AtomicTargetsVectorialMACE",
+            "VectorialAtomicTargetsSolidHarmonicsSelfVecMACE",
         ],
     )
     parser.add_argument(
@@ -494,6 +493,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=DefaultKeys.ATOMIC_TARGETS.value,
     )
+    parser.add_argument(
+        "--vecs_key",
+        help="Key of vector representations in training xyz",
+        type=str,
+        default=DefaultKeys.VECS.value,
+    )
     # masking for atomic_targets
     parser.add_argument(
         "--atomic_targets_mask_key",
@@ -501,7 +506,6 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=DefaultKeys.ATOMIC_TARGETS_MASK.value,
     )
-
     parser.add_argument(
         "--atomic_targets_mask",
         help="whether to use mask defined in xyz during fitting",
@@ -768,6 +772,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str2bool,
         default=False,
     )
+    # optional for data augmentation
+    parser.add_argument(
+        "--data_aug_vec",
+        help="Whether to use data agumentation on vectorial property training",
+        type=str2bool,
+        default=False,
+    )
     # options for using Weights and Biases for experiment tracking
     # to install see https://wandb.ai
     parser.add_argument(
@@ -818,6 +829,44 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "forces_weight",
         ],
     )
+
+    # -- vectorial MACE options --
+    parser.add_argument(
+        "--v_max",
+        help="|v| basis v_max for vectorial property",
+        type=float,
+        nargs='+',
+    )
+    parser.add_argument(
+        "--max_v_ell",
+        help="max_ell for vectorial property",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
+        "--num_vec_radial_basis",
+        help="number of radial basis for vectorial property",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
+        "--contraction_cls_first",
+        help="Type of first contraction block used",
+        type=str,
+        default="SymmetricContraction",
+    )
+    parser.add_argument(
+        "--contraction_cls",
+        help="Type of contraction blocks used except first layer",
+        type=str,
+        default="SymmetricContraction",
+    )
+    parser.add_argument(
+        "--train_one_body_contribution",
+        type=str2bool,
+        default=True
+    )  
+ 
     return parser
 
 
@@ -929,6 +978,12 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Key of atomic charges in training xyz",
         type=str,
         default=DefaultKeys.CHARGES.value,
+    )
+    parser.add_argument(
+        "--vecs_key",
+        help="Key of vectorial property in training xyz",
+        type=str,
+        default=DefaultKeys.VECS.value,
     )
     parser.add_argument(
         "--atomic_targets_key",

@@ -50,7 +50,7 @@ def update_keyspec_from_kwargs(
 ) -> KeySpecification:
     # convert command line style property_key arguments into a keyspec
     infos = ["energy_key", "stress_key", "virials_key", "dipole_key", "head_key"]
-    arrays = ["forces_key", "charges_key", "atomic_targets_key", "atomic_targets_mask_key"]
+    arrays = ["forces_key", "charges_key", "atomic_targets_key", "atomic_targets_mask_key", "vecs_key"]
     info_keys = {}
     arrays_keys = {}
     for key in infos:
@@ -215,6 +215,7 @@ def load_from_xyz(
     stress_key = key_specification.info_keys["stress"]
     atomic_targets_key = key_specification.arrays_keys["atomic_targets"]
     atomic_targets_mask_key = key_specification.arrays_keys["atomic_targets_mask"]
+    vecs_key = key_specification.arrays_keys["vecs"]
     head_key = key_specification.info_keys["head"]
     if energy_key == "energy":
         logging.warning(
