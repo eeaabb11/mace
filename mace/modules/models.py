@@ -15,7 +15,7 @@ from e3nn.util.jit import compile_mode
 from mace.modules.radial import ZBLBasis
 from mace.tools.scatter import scatter_sum
 
-from mace.mace.tools.torch_geometric import data
+from mace.tools.torch_geometric import data
 
 from .blocks import (
     AtomicEnergiesBlock,
@@ -609,7 +609,7 @@ class VectorialMACE(torch.nn.Module):
         self.vec_spherical_harmonics = o3.SphericalHarmonics(
             vec_sh_irreps, normalize=True, normalization="component"
         )
-        vec_node_inv_feats_irreps = o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e")
+        vec_edge_inv_feats_irreps = o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e")
 
         # --- INTERACTIONS, PRODUCT AND READOUT ---
         self.atomic_energies_fn = AtomicEnergiesBlock(atomic_energies)
@@ -625,8 +625,8 @@ class VectorialMACE(torch.nn.Module):
             avg_num_neighbors=avg_num_neighbors,
             radial_MLP=radial_MLP,
             cueq_config=cueq_config,
-            vec_node_inv_feats_irreps=vec_node_inv_feats_irreps,
-            vec_node_attrs_irreps=vec_sh_irreps
+            vec_edge_inv_feats_irreps=vec_edge_inv_feats_irreps,
+            vec_edge_attrs_irreps=vec_sh_irreps
         )
         self.interactions = torch.nn.ModuleList([inter])
 
@@ -646,22 +646,22 @@ class VectorialMACE(torch.nn.Module):
             use_sc=use_sc_first,
             num_elements=len(self.atomic_numbers),
             cueq_config=cueq_config,
-            vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
-            vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+            vec_edge_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+            vec_edge_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
         )
-        vec_prod = prod_block_cls(
-            node_feats_irreps=node_feats_irreps_out,
-            target_irreps=hidden_irreps,
-            # assume only a single correlation
-            correlation=correlation[0],
-            use_sc=use_sc_first,
-            num_elements=len(self.atomic_numbers),
-            cueq_config=cueq_config,
-            vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
-            vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
-        )
+        # vec_prod = prod_block_cls(
+        #     node_feats_irreps=node_feats_irreps_out,
+        #     target_irreps=hidden_irreps,
+        #     # assume only a single correlation
+        #     correlation=correlation[0],
+        #     use_sc=use_sc_first,
+        #     num_elements=len(self.atomic_numbers),
+        #     cueq_config=cueq_config,
+        #     vec_edge_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+        #     vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+        # )
         self.products = torch.nn.ModuleList([prod])
-        self.vec_products = torch.nn.ModuleList([vec_prod])
+        # self.vec_products = torch.nn.ModuleList([vec_prod])
 
         self.readouts = torch.nn.ModuleList()
         self.readouts.append(
@@ -693,8 +693,8 @@ class VectorialMACE(torch.nn.Module):
                 avg_num_neighbors=avg_num_neighbors,
                 radial_MLP=radial_MLP,
                 cueq_config=cueq_config,
-                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
-                vec_node_attrs_irreps=vec_sh_irreps
+                vec_edge_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                vec_edge_attrs_irreps=vec_sh_irreps
             )
             self.interactions.append(inter)
 
@@ -707,24 +707,24 @@ class VectorialMACE(torch.nn.Module):
                 use_sc = True,
                 cueq_config=prod.cueq_config,
                 contraction_cls=contraction_cls,
-                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
-                vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+                vec_edge_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+                vec_edge_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
             )
-            vec_prod = EquivariantProductBasisWithSelfVecBlock(
-                node_feats_irreps=interaction_irreps,
-                target_irreps=hidden_irreps_out,
-                # assume only a single correlation
-                correlation=correlation[i + 1],
-                num_elements=num_elements,
-                use_sc = True,
-                cueq_config=prod.cueq_config,
-                contraction_cls=contraction_cls,
-                vec_node_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
-                vec_node_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
-            )
+            # vec_prod = EquivariantProductBasisWithSelfVecBlock(
+            #     node_feats_irreps=interaction_irreps,
+            #     target_irreps=hidden_irreps_out,
+            #     # assume only a single correlation
+            #     correlation=correlation[i + 1],
+            #     num_elements=num_elements,
+            #     use_sc = True,
+            #     cueq_config=prod.cueq_config,
+            #     contraction_cls=contraction_cls,
+            #     vec_edge_inv_feats_irreps=o3.Irreps(f"{self.vec_radial_embedding.num_basis}x0e"),
+            #     vec_edge_attrs_irreps=o3.Irreps.spherical_harmonics(self.vec_spherical_harmonics._lmax)
+            # )
 
             self.products.append(prod)
-            self.vec_products.append(vec_prod)
+            # self.vec_products.append(vec_prod)
             
             if i == num_interactions - 2:
                 self.readouts.append(
@@ -939,32 +939,44 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
         )
             # --- vectorial stuffs ---
         # old v_i stuff
-        vec_lengths = torch.norm(data["vecs"], dim=-1, keepdim=True)
-        element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
-        element_dependent_scaling.requires_grad_(True)
-        element_dependent_scaling.retain_grad()
-        vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
-        vec_vectors = data["vecs"] / (vec_lengths + 1e-9)
+        # vec_lengths = torch.norm(data["vecs"], dim=-1, keepdim=True)
+        # element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
+        # element_dependent_scaling.requires_grad_(True)
+        # element_dependent_scaling.retain_grad()
+        # vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
+        # vec_vectors = data["vecs"] / (vec_lengths + 1e-9)
 
         # new v_ij stuff --- to do ----
-        # senders = data["edge_index"][0]
-        # receivers = data["edge_index"][1]
-        # vec = data["vecs"] # Get per-particle vectors
-        # vec_ij = vec[receivers] - vec[senders] # Compute relative vector: v_ij = v_j - v_i
-        # vec_lengths = torch.norm(vec_ij, dim=-1, keepdim=True)  # (n_edges, 1) # Then compute the lengths
-        # vec_lengths_trans = vec_lengths
-        # Normalize the vectors
+        senders = data["edge_index"][0]
+        receivers = data["edge_index"][1]
+        vec = data["vecs"] # Get per-particle vectors
+        vec_ij = vec[receivers] - vec[senders] # Compute relative vector: v_ij = v_j - v_i
+        vec_lengths = torch.norm(vec_ij, dim=-1, keepdim=True)  # (n_edges, 1) # Then compute the lengths
+        vec_lengths_trans = vec_lengths
+        # #Normalize the vectors
         # vec_vectors = vec_ij / (vec_lengths + 1e-9)
 
         # Compute the SOLID harmonics from the normalized vectors
-        vec_node_attrs_raw = self.vec_solid_harmonics(vec_vectors) 
+        vec_edge_attrs_raw = self.vec_solid_harmonics(vec_ij) # switched from vec_vectors
+
+        # print(f"vec_edge_attrs_raw shape: {vec_edge_attrs_raw}")
+        # abs_max = np.max(np.abs(vec_edge_attrs_raw.detach().cpu().numpy()))
+        # abs_min = np.min(np.abs(vec_edge_attrs_raw.detach().cpu().numpy()))
+        # print(f"vec_edge_attrs_raw abs max: {abs_max}, abs min: {abs_min}")
+
+        
 
         # Replace output with 1 when the magnitude is 0, preserving gradient flow
-        is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
-        vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
+        # is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
+        # vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
 
         # Radial embedding for vectorial features
-        vec_node_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_nodes, n_basis)
+        vec_edge_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_nodes, n_basis)
+
+        # print(f"vec_edge_features_raw shape: {vec_edge_feats}")
+        # abs_max = np.max(np.abs(vec_edge_feats.detach().cpu().numpy()))
+        # abs_min = np.min(np.abs(vec_edge_feats.detach().cpu().numpy()))
+        # print(f"vec_edge_features_raw abs max: {abs_max}, abs min: {abs_min}")
 
         # -- INTERACTION --
         node_es_list = []
@@ -978,15 +990,20 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
                 edge_attrs=edge_attrs,
                 edge_feats=edge_feats,
                 edge_index=data["edge_index"],
-                vec_node_inv_feats=vec_node_feats,
-                vec_node_attrs=vec_node_attrs
+                vec_edge_inv_feats=vec_edge_feats,
+                vec_edge_attrs=vec_edge_attrs_raw,
             )
+
+            # print(f"node_feats: {node_feats}")
+            # abs_max = np.max(np.abs(node_feats.detach().cpu().numpy()))
+            # abs_min = np.min(np.abs(node_feats.detach().cpu().numpy()))
+            # print(f"node_feats abs max: {abs_max}, abs min: {abs_min}")
             node_feats = product(
                 node_feats=node_feats, 
                 sc=sc, 
                 node_attrs=data["node_attrs"],
-                vec_node_inv_feats=vec_node_feats,
-                vec_node_attrs=vec_node_attrs,
+                vec_edge_inv_feats=vec_edge_feats,
+                vec_edge_attrs=vec_edge_attrs_raw,
             )
             node_feats_list.append(node_feats)
 

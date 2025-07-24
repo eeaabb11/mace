@@ -309,8 +309,8 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
         self,
         node_feats_irreps: o3.Irreps,
         target_irreps: o3.Irreps,
-        vec_node_inv_feats_irreps: o3.Irreps,
-        vec_node_attrs_irreps: o3.Irreps,
+        vec_edge_inv_feats_irreps: o3.Irreps,
+        vec_edge_attrs_irreps: o3.Irreps,
         correlation: int,
         use_sc: bool = True,
         num_elements: Optional[int] = None,
@@ -320,8 +320,8 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
         super().__init__()
 
         self.use_sc = use_sc
-        self.vec_node_inv_feats_irreps = vec_node_inv_feats_irreps
-        self.vec_node_attrs_irreps = vec_node_attrs_irreps
+        self.vec_edge_inv_feats_irreps = vec_edge_inv_feats_irreps
+        self.vec_edge_attrs_irreps = vec_edge_attrs_irreps
         self.cueq_config = cueq_config
         self.contraction_cls = contraction_cls
         
@@ -339,32 +339,33 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
         # interaction with self vector
         irreps_mid, instructions = tp_out_irreps_with_instructions(
             o3.Irreps(str(target_irreps)),
-            self.vec_node_attrs_irreps,
+            self.vec_edge_attrs_irreps,
             o3.Irreps(str(target_irreps)),
         )
-        self.conv_tp = TensorProduct(
-            o3.Irreps(str(target_irreps)),
-            self.vec_node_attrs_irreps,
-            irreps_mid,
-            instructions=instructions,
-            shared_weights=False,
-            internal_weights=False,
-            cueq_config=self.cueq_config,
-        )
-        vec_input_dim = self.vec_node_inv_feats_irreps.num_irreps
-        self.conv_tp_weights =  nn.FullyConnectedNet(
-            [vec_input_dim] + [64, 64, 64] + [self.conv_tp.weight_numel],
-            torch.nn.functional.silu,
-        )
+        # not used
+        # self.conv_tp = TensorProduct(
+        #     o3.Irreps(str(target_irreps)),
+        #     self.vec_edge_attrs_irreps,
+        #     irreps_mid,
+        #     instructions=instructions,
+        #     shared_weights=False,
+        #     internal_weights=False,
+        #     cueq_config=self.cueq_config,
+        # )
+        # vec_input_dim = self.vec_edge_inv_feats_irreps.num_irreps
+        # self.conv_tp_weights =  nn.FullyConnectedNet(
+        #     [vec_input_dim] + [64, 64, 64] + [self.conv_tp.weight_numel],
+        #     torch.nn.functional.silu,
+        # )
         
         # Update linear
-        self.linear = Linear(
-            self.conv_tp.irreps_out,
-            o3.Irreps(str(target_irreps)),
-            internal_weights=True,
-            shared_weights=True,
-            cueq_config=cueq_config,
-        )
+        # self.linear = Linear(
+        #     self.conv_tp.irreps_out,
+        #     o3.Irreps(str(target_irreps)),
+        #     internal_weights=True,
+        #     shared_weights=True,
+        #     cueq_config=cueq_config,
+        # )
         self.linear_ori = Linear(
             o3.Irreps(str(target_irreps)),
             o3.Irreps(str(target_irreps)),
@@ -377,8 +378,8 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
         node_feats: torch.Tensor,
         sc: Optional[torch.Tensor],
         node_attrs: torch.Tensor,
-        vec_node_inv_feats: torch.Tensor,
-        vec_node_attrs: torch.Tensor,
+        vec_edge_inv_feats: torch.Tensor,
+        vec_edge_attrs: torch.Tensor,
     ) -> torch.Tensor:
         use_cueq = False
         use_cueq_mul_ir = False
@@ -402,10 +403,10 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
             node_feats = self.symmetric_contractions(node_feats, node_attrs)
 
         # interaction with vector
-        tp_weights = self.conv_tp_weights(vec_node_inv_feats)
-        # print("vec_node_inv_feats: ", vec_node_inv_feats)
+        #tp_weights = self.conv_tp_weights(vec_edge_inv_feats)
+        # print("vec_edge_inv_feats: ", vec_edge_inv_feats)
         # print("tp_weights:", tp_weights)
-        out = self.conv_tp(node_feats, vec_node_attrs, tp_weights)
+        #out = self.conv_tp(node_feats, vec_edge_attrs, tp_weights)
         # print("node_feats:", node_feats)
         # print("vec_node_attrs:", vec_node_attrs)
         # print("out: ", out)
@@ -413,9 +414,9 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
         # print(torch.norm(self.linear_ori(node_feats)))
         # out = node_feats
         if self.use_sc and sc is not None:
-            out_message = self.linear(out) + self.linear_ori(node_feats) + sc
+            out_message = self.linear_ori(node_feats) + sc #self.linear(out)
         else:
-            out_message = self.linear(out) + self.linear_ori(node_feats)
+            out_message = self.linear_ori(node_feats) #self.linear(out)
         return out_message
 
 
@@ -494,12 +495,12 @@ nonlinearities = {1: torch.nn.functional.silu, -1: torch.tanh}
 class VectorialInteractionBlock(InteractionBlock):
     def __init__(
         self,
-        vec_node_inv_feats_irreps: Optional[o3.Irreps] = None,
-        vec_node_attrs_irreps: Optional[o3.Irreps] = None,
+        vec_edge_inv_feats_irreps: Optional[o3.Irreps] = None,
+        vec_edge_attrs_irreps: Optional[o3.Irreps] = None,
         **kwargs,
     ) -> None:
-        self.vec_node_inv_feats_irreps = vec_node_inv_feats_irreps
-        self.vec_node_attrs_irreps = vec_node_attrs_irreps
+        self.vec_edge_inv_feats_irreps = vec_edge_inv_feats_irreps
+        self.vec_edge_attrs_irreps = vec_edge_attrs_irreps
         super().__init__(**kwargs)
 
     @abstractmethod
@@ -514,8 +515,8 @@ class VectorialInteractionBlock(InteractionBlock):
         edge_attrs: torch.Tensor,
         edge_feats: torch.Tensor,
         edge_index: torch.Tensor,
-        vec_node_inv_feats: Optional[torch.Tensor] = None,
-        vec_node_attrs: Optional[torch.Tensor] = None,
+        vec_edge_inv_feats: Optional[torch.Tensor] = None,
+        vec_edge_attrs: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -854,12 +855,12 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         vec_irreps_mid, vec_instructions = tp_out_irreps_with_instructions(
             #self.conv_tp.irreps_out,
             irreps_mid,
-            self.vec_node_attrs_irreps,
+            self.vec_edge_attrs_irreps,
             self.target_irreps,
         )
         self.vec_conv_tp = TensorProduct(
             self.conv_tp.irreps_out,
-            self.vec_node_attrs_irreps,
+            self.vec_edge_attrs_irreps,
             vec_irreps_mid,
             instructions=vec_instructions,
             shared_weights=False,
@@ -869,7 +870,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         print("===done init vec conv_tp===")
         # Convolution weights 
         input_dim = self.edge_feats_irreps.num_irreps
-        vec_input_dim = self.vec_node_inv_feats_irreps.num_irreps
+        vec_input_dim = self.vec_edge_inv_feats_irreps.num_irreps
         self.conv_tp_weights = nn.FullyConnectedNet(
             [input_dim + vec_input_dim] + self.radial_MLP + [self.conv_tp.weight_numel],
             torch.nn.functional.silu,
@@ -910,12 +911,12 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
     def forward(
         self,
         node_attrs: torch.Tensor,
-        node_feats: torch.Tensor,
+        node_feats: torch.Tensor, #solid harmoics
         edge_attrs: torch.Tensor,
         edge_feats: torch.Tensor, # (n_edges, n_basis)
         edge_index: torch.Tensor,
-        vec_node_inv_feats: torch.Tensor,
-        vec_node_attrs: torch.Tensor
+        vec_edge_inv_feats: torch.Tensor,
+        vec_edge_attrs: torch.Tensor
     ) -> Tuple[torch.Tensor, None]:
         sender = edge_index[0]
         receiver = edge_index[1]
@@ -924,9 +925,24 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         node_feats = self.linear_up(node_feats)
         
         # boardcast node feats to number of nodes
-        vec_inv_feats_j = vec_node_inv_feats[sender] # remove sender in future!!!!!
+        #vec_inv_feats_j = vec_edge_inv_feats[sender] # remove sender in future!!!!!
+        vec_inv_feats_j = vec_edge_inv_feats
+
         
-        edge_feats_with_vec = torch.cat([edge_feats, vec_inv_feats_j], dim=-1)        
+        edge_feats_with_vec = torch.cat([edge_feats, vec_inv_feats_j], dim=-1)
+
+        # print("edge_feats: ", edge_feats)
+        # min_edge_feats = torch.min(edge_feats)
+        # print("min_edge_feats: ", min_edge_feats)
+        # max_edge_feats = torch.max(edge_feats)
+        # print("max_edge_feats: ", max_edge_feats)
+
+        # print("vec_edge_inv_feats: ", vec_edge_inv_feats)
+        # min_vec_edge_inv_feats = torch.min(vec_edge_inv_feats)
+        # print("min_vec_edge_inv_feats: ", min_vec_edge_inv_feats)
+        # max_vec_edge_inv_feats = torch.max(vec_edge_inv_feats)
+        # print("max_vec_edge_inv_feats: ", max_vec_edge_inv_feats)
+
         
         # combined learnable radial
         tp_weights = self.conv_tp_weights(edge_feats_with_vec)
@@ -937,23 +953,38 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         mji = self.conv_tp(
             node_feats[sender], edge_attrs, tp_weights
         )  # [n_edges, irreps]
-        
+
+        # max_abs = torch.max(torch.abs(mji))
+        # min_abs = torch.min(torch.abs(mji))
+        # print("max_abs: ", max_abs)
+        # print("min_abs: ", min_abs)
+
         tp_weights_vec = self.conv_tp_weights_vec(edge_feats_with_vec)
         
         vec_mji = self.vec_conv_tp(
-            mji, vec_node_attrs[sender], tp_weights_vec
+            mji, vec_edge_attrs, tp_weights_vec
         )  # [n_edges, irreps]
+
+        # max_abs_vec = torch.max(torch.abs(vec_mji))
+        # min_abs_vec = torch.min(torch.abs(vec_mji))
+        # print("max_abs_vec: ", max_abs_vec)
+        # print("min_abs_vec: ", min_abs_vec)
         
         density = scatter_sum(
             src=edge_density, index=receiver, dim=0, dim_size=num_nodes
         )  # [n_nodes, 1]
+
+        max_density = torch.max(density)
+        min_density = torch.min(density)
+        print("max_density: ", max_density)
+        print("min_density: ", min_density)
         
         vec_message = scatter_sum(
             src=vec_mji, index=receiver, dim = 0, dim_size=num_nodes,
         )
 
-        vec_message = self.vec_linear(vec_message) / (density + 1)
-        vec_message = self.vec_skip_tp(vec_message, node_attrs)
+        vec_message = self.vec_linear(vec_message) / (density + 1) / 400
+        vec_message = self.vec_skip_tp(vec_message, node_attrs) 
         return (
             self.reshape(vec_message),
             None,
