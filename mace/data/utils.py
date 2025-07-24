@@ -171,6 +171,10 @@ def config_from_atoms(
         else: # if not atoms_key in atoms.arrays:
             property_weights[name] = 0.0
 
+    if "vecs" not in properties and "vecs" in atoms.arrays:
+        properties["vecs"] = atoms.arrays["vecs"]
+        property_weights["vecs"] = 1.0
+
     return Configuration(
         atomic_numbers=atomic_numbers,
         positions=atoms.get_positions(),

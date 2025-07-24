@@ -15,6 +15,8 @@ from e3nn.util.jit import compile_mode
 from mace.modules.radial import ZBLBasis
 from mace.tools.scatter import scatter_sum
 
+from mace.mace.tools.torch_geometric import data
+
 from .blocks import (
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
@@ -944,7 +946,7 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
         vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
         vec_vectors = data["vecs"] / (vec_lengths + 1e-9)
 
-        # new v_ij stuff
+        # new v_ij stuff --- to do ----
         # senders = data["edge_index"][0]
         # receivers = data["edge_index"][1]
         # vec = data["vecs"] # Get per-particle vectors

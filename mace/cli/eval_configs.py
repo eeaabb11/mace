@@ -88,7 +88,12 @@ def run(args: argparse.Namespace) -> None:
     if args.head is not None:
         for atoms in atoms_list:
             atoms.info["head"] = args.head
-    configs = [data.config_from_atoms(atoms) for atoms in atoms_list]
+    # 
+    from mace.data.utils import KeySpecification
+    keyspec = KeySpecification.from_defaults()
+    keyspec.arrays_keys["vecs"] = "vecs"  # <-- ADD THIS
+    #configs = [data.config_from_atoms(atoms, ) for atoms in atoms_list]
+    configs = [data.config_from_atoms(atoms, key_specification=keyspec) for atoms in atoms_list]
 
     z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 
