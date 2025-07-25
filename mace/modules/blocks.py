@@ -373,6 +373,7 @@ class EquivariantProductBasisWithSelfVecBlock(torch.nn.Module):
             shared_weights=True,
             cueq_config=cueq_config,
         )
+        self.linear = self.linear_ori
     def forward(
         self,
         node_feats: torch.Tensor,
@@ -825,7 +826,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         if not hasattr(self, "cueq_config"):
             self.cueq_config = None
 
-        print("into VectorialRealAgnosticDensityInteractionBlock")
+        #print("into VectorialRealAgnosticDensityInteractionBlock")
         # First linear
         self.linear_up = Linear(
             self.node_feats_irreps,
@@ -834,7 +835,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
             shared_weights=True,
             cueq_config=self.cueq_config,
         )
-        print("===done init linear===")
+        #print("===done init linear===")
         # TensorProduct for real space
         irreps_mid, instructions = tp_out_irreps_with_instructions(
             self.node_feats_irreps,
@@ -850,7 +851,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
             internal_weights=False,
             cueq_config=self.cueq_config,
         )
-        print("===done init conv_tp===")
+        #print("===done init conv_tp===")
         # TensorProduct in vector space
         vec_irreps_mid, vec_instructions = tp_out_irreps_with_instructions(
             #self.conv_tp.irreps_out,
@@ -867,7 +868,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
             internal_weights=False,
             cueq_config=self.cueq_config,
         )
-        print("===done init vec conv_tp===")
+        #print("===done init vec conv_tp===")
         # Convolution weights 
         input_dim = self.edge_feats_irreps.num_irreps
         vec_input_dim = self.vec_edge_inv_feats_irreps.num_irreps
@@ -976,14 +977,14 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
 
         max_density = torch.max(density)
         min_density = torch.min(density)
-        print("max_density: ", max_density)
-        print("min_density: ", min_density)
+        # print("max_density: ", max_density)
+        # print("min_density: ", min_density)
         
         vec_message = scatter_sum(
             src=vec_mji, index=receiver, dim = 0, dim_size=num_nodes,
         )
 
-        vec_message = self.vec_linear(vec_message) / (density + 1) / 400
+        vec_message = self.vec_linear(vec_message) / (density + 1) # / 400
         vec_message = self.vec_skip_tp(vec_message, node_attrs) 
         return (
             self.reshape(vec_message),

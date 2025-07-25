@@ -789,6 +789,7 @@ class SHModule(torch.nn.Module):
                 xyz, 1, torch.tensor([2, 0, 1], dtype=torch.long,device=xyz.device)
             ))
         return sh
+
     
 @compile_mode("script")
 class AtomicTargetsMACE(MACE):
