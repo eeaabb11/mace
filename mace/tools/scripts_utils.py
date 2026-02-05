@@ -629,6 +629,13 @@ def get_loss_fn(
         loss_fn = modules.AtomicTargetsLoss(
             huber_delta=args.huber_delta, random_mask = args.atomic_targets_random_mask, random_mask_ratio = args.atomic_targets_random_mask_ratio,
         )
+    elif args.loss == "atomic_targets_sbmr":
+        assert dipole_only is False and targets_only is True
+        loss_fn = modules.AtomicTargetsSBMRLoss(
+            huber_delta=args.huber_delta, random_mask = args.atomic_targets_random_mask, random_mask_ratio = args.atomic_targets_random_mask_ratio,
+            sbmr_weight = args.sbmr_weight, 
+            y_train_mean = args.y_train_mean,
+        )
     else:
         loss_fn = modules.WeightedEnergyForcesLoss(energy_weight=1.0, forces_weight=1.0)
     return loss_fn

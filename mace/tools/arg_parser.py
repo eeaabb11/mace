@@ -518,6 +518,18 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=None,
     )
     parser.add_argument(
+        "--y_train_mean",
+        help="mean of atomic targets in training set",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--sbmr_weight",
+        help="weight for the SBMR loss term",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
         "--skip_evaluate_heads",
         help="Comma-separated list of heads to skip during final evaluation",
         type=str,
@@ -541,6 +553,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "energy_forces_dipole",
             "l1l2energyforces",
             "atomic_targets",
+            "atomic_targets_sbmr"
         ],
     )
     parser.add_argument(

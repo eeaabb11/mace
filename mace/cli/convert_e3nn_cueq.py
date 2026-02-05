@@ -96,9 +96,9 @@ def transfer_weights(
     )
 
     # Unsqueeze linear and skip_tp layers
-    for key in source_dict.keys():
-        if any(x in key for x in ["linear", "skip_tp"]) and "weight" in key:
-            target_dict[key] = target_dict[key].unsqueeze(0)
+    # for key in source_dict.keys():
+    #     if any(x in key for x in ["linear", "skip_tp"]) and "weight" in key:
+    #         target_dict[key] = target_dict[key].unsqueeze(0)
 
     transferred_keys = set(transfer_keys)
     remaining_keys = (
@@ -121,8 +121,13 @@ def transfer_weights(
             i
         ].avg_num_neighbors
 
-    # Load state dict into target model
-    target_model.load_state_dict(target_dict)
+    # # Load state dict into target model
+    # target_model.load_state_dict(target_dict)
+    # Filter out any keys not present in target model
+    model_sd = target_model.state_dict()
+    clean = {k: v for k, v in target_dict.items() if k in model_sd}
+
+    target_model.load_state_dict(clean, strict=False)
 
 
 def run(

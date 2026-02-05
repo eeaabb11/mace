@@ -240,6 +240,63 @@ class AtomicTargetsLoss(torch.nn.Module):
 
     def __repr__(self):
         return f"{self.__class__.__name__}(huber_delta={self.huber_loss.delta:.3f})"
+    
+# ------------------------------------------------------------------------------
+# Atomic Targets Loss with Systematic Unbiased Predictions Scaling -- Ref: https://arxiv.org/pdf/2405.15950v2
+# ------------------------------------------------------------------------------
+class AtomicTargetsSBMRLoss(torch.nn.Module):
+    def __init__(self,
+                 huber_delta=0.01,
+                 random_mask=False,
+                 random_mask_ratio=None,
+                 sbmr_weight=1.0,
+                 y_train_mean: float=0
+                 ) -> None:
+        super().__init__()
+        self.huber_delta = huber_delta
+        self.random_mask = random_mask
+        self.random_mask_ratio = random_mask_ratio
+        self.sbmr_weight = sbmr_weight
+        self.y_train_mean = y_train_mean
+
+
+    def forward(self, ref: Batch, pred: TensorDict) -> torch.Tensor:
+        mask = ref["atomic_targets_mask"]
+        if self.random_mask:
+            ones_indices = torch.nonzero(mask, as_tuple=True)[0]
+            num_ones_to_keep = int(len(ones_indices) * self.random_mask_ratio)
+            selected_indices = ones_indices[torch.randperm(len(ones_indices))[:num_ones_to_keep]]
+            mask = torch.zeros_like(mask)
+            mask[selected_indices] = 1
+
+        y_true = ref["atomic_targets"]
+        y_pred = pred["atomic_targets"]
+
+        # Base Loss: Huber over valid atoms only
+        raw = torch.nn.functional.huber_loss(y_true, y_pred, reduction="none", delta=self.huber_delta)
+        denom = mask.sum().clamp_min(1).to(raw.dtype)
+        base = (raw * mask).sum() / denom
+        base = base * 1e3
+
+        # SBMR
+        valid = mask > 0
+        low = valid & (y_true < self.y_train_mean)
+        high = valid & (y_true > self.y_train_mean)
+
+        pen = y_true.new_tensor(0.0)
+
+        if low.any():
+            c_low = y_pred[low].mean() - y_true[low].mean()
+            pen = pen + c_low.pow(2)
+
+        if high.any():
+            c_high = y_pred[high].mean() - y_true[high].mean()
+            pen = pen + c_high.pow(2)
+        
+        return base + self.sbmr_weight * pen
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(huber_delta={self.huber_delta:.3f}, sbmr_weight={self.sbmr_weight:.3f}, y_train_mean={self.y_train_mean:.3f})"
 
 # ------------------------------------------------------------------------------
 # Loss Modules Combining Multiple Quantities

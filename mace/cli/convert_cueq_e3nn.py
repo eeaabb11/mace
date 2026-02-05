@@ -57,7 +57,13 @@ def transfer_symmetric_contractions(
 
     for i, kmax in kmax_pairs:
         # Get the combined weight tensor from source
-        wm = source_dict[f"products.{i}.symmetric_contractions.weight"]
+        #wm = source_dict[f"products.{i}.symmetric_contractions.weight"]
+        src_key = f"products.{i}.symmetric_contractions.weight"
+        if src_key not in source_dict:
+            logging.warning(f"Missing {src_key} in CuEq model; skipping symmetric contraction transfer for products.{i}.")
+            continue
+        wm = source_dict[src_key]
+
 
         # Get split sizes based on target dimensions
         splits = []
@@ -140,7 +146,11 @@ def transfer_weights(
         ].avg_num_neighbors
 
     # Load state dict into target model
-    target_model.load_state_dict(target_dict)
+    #target_model.load_state_dict(target_dict)
+    model_sd = target_model.state_dict()
+    clean = {k: v for k, v in target_dict.items() if k in model_sd}
+    target_model.load_state_dict(clean, strict=False)
+
 
 
 def run(input_model, output_model="_e3nn.model", device="cpu", return_model=True):

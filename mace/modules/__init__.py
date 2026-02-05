@@ -29,7 +29,8 @@ from .loss import (
     WeightedEnergyForcesVirialsLoss,
     WeightedForcesLoss,
     WeightedHuberEnergyForcesStressLoss,
-    AtomicTargetsLoss
+    AtomicTargetsLoss,
+    AtomicTargetsSBMRLoss,
 )
 from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE
 from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
@@ -95,6 +96,7 @@ __all__ = [
     "WeightedHuberEnergyForcesStressLoss",
     "UniversalLoss",
     "AtomicTargetsLoss",
+    "AtomicTargetsSBMRLoss",
     "WeightedEnergyForcesL1L2Loss",
     "SymmetricContraction",
     "interaction_classes",
