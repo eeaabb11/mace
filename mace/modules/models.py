@@ -548,7 +548,7 @@ class VectorialMACE(torch.nn.Module):
         radial_MLP: Optional[List[int]] = None,
         radial_type: Optional[str] = "bessel",
         heads: Optional[List[str]] = None,
-        cueq_config: Optional[Dict[str, Any]] = None, 
+        cueq_config: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
         self.register_buffer(
@@ -563,6 +563,10 @@ class VectorialMACE(torch.nn.Module):
         self.register_buffer(
             "num_interactions", torch.tensor(num_interactions, dtype=torch.int64)
         )
+        self.register_buffer("v_max", torch.tensor(v_max, dtype=torch.get_default_dtype()))
+        self.register_buffer("num_vec_radial_basis", torch.tensor(num_vec_radial_basis, dtype=torch.int64))
+        self.register_buffer("max_v_ell", torch.tensor(max_v_ell, dtype=torch.int64))
+        
         if heads is None:
             heads = ["default"]
         self.heads = heads
@@ -895,8 +899,8 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
         )
         # modify spherical to solid harmonics for vector
         self.vec_solid_harmonics = SHModule(self.vec_spherical_harmonics._lmax)
-
         self.vec_spherical_harmonics = None
+
         self.vec_readouts = None
         self.vec_products = None
 
@@ -939,45 +943,31 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
             lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
         )
             # --- vectorial stuffs ---
-        # old v_i stuff
-        # vec_lengths = torch.norm(data["vecs"], dim=-1, keepdim=True)
-        # element_dependent_scaling = self.v_max[torch.argmax(data["node_attrs"], dim=1)].unsqueeze(-1)
-        # element_dependent_scaling.requires_grad_(True)
-        # element_dependent_scaling.retain_grad()
-        # vec_lengths_trans = 1 - 2 * (vec_lengths / element_dependent_scaling) ** 2
-        # vec_vectors = data["vecs"] / (vec_lengths + 1e-9)
-
-        # new v_ij stuff --- to do ----
         senders = data["edge_index"][0]
         receivers = data["edge_index"][1]
         vec = data["vecs"] # Get per-particle vectors
         vec_ij = vec[receivers] - vec[senders] # Compute relative vector: v_ij = v_j - v_i
         vec_lengths = torch.norm(vec_ij, dim=-1, keepdim=True)  # (n_edges, 1) # Then compute the lengths
-        vec_lengths_trans = vec_lengths
-        # #Normalize the vectors
-        # vec_vectors = vec_ij / (vec_lengths + 1e-9)
+
+        # Normalize the vectors
+        vec_unit = vec_ij / (vec_lengths + 1e-9)
 
         # Compute the SOLID harmonics from the normalized vectors
-        vec_edge_attrs_raw = self.vec_solid_harmonics(vec_ij) # switched from vec_vectors
+        vec_edge_attrs_raw = self.vec_solid_harmonics(vec_unit) # switched from vec_vectors, nope
 
-        # print(f"vec_edge_attrs_raw shape: {vec_edge_attrs_raw}")
-        # abs_max = np.max(np.abs(vec_edge_attrs_raw.detach().cpu().numpy()))
-        # abs_min = np.min(np.abs(vec_edge_attrs_raw.detach().cpu().numpy()))
-        # print(f"vec_edge_attrs_raw abs max: {abs_max}, abs min: {abs_min}")
-
-        
-
+    
         # Replace output with 1 when the magnitude is 0, preserving gradient flow
         # is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
         # vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
 
         # Radial embedding for vectorial features
+        # make vec_lengths scaled so they are mostly in the range of (-1, 1) for the Chebychev basis, and dont blow up.
+        scale = torch.quantile(vec_lengths.detach().flatten(), 0.95).clamp_min(1e-6) # scale based on 95th percentile to avoid outliers dominating, and clamp to avoid division by zero
+
+        t = (vec_lengths / (scale + 1e-9)).clamp(0.0, 1.0)   # t in [0,1]
+        vec_lengths_trans = 1.0 - 2.0 * (t ** 2)             # in [-1,1]
         vec_edge_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_nodes, n_basis)
 
-        # print(f"vec_edge_features_raw shape: {vec_edge_feats}")
-        # abs_max = np.max(np.abs(vec_edge_feats.detach().cpu().numpy()))
-        # abs_min = np.min(np.abs(vec_edge_feats.detach().cpu().numpy()))
-        # print(f"vec_edge_features_raw abs max: {abs_max}, abs min: {abs_min}")
 
         # -- INTERACTION --
         node_es_list = []

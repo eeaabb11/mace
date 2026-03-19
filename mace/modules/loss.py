@@ -236,6 +236,9 @@ class AtomicTargetsLoss(torch.nn.Module):
             selected_indices = ones_indices[torch.randperm(len(ones_indices))[:num_ones_to_keep]]
             mask = torch.zeros_like(mask)
             mask[selected_indices] = 1
+        
+        #print("ref:", ref["atomic_targets"][0], "pred:", pred["atomic_targets"][0])
+
         return self.huber_loss(ref["atomic_targets"] * mask, pred["atomic_targets"] * mask) * 1e3
 
     def __repr__(self):

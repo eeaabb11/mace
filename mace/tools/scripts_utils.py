@@ -261,6 +261,32 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         )
     except AttributeError:
         correlation = model.products[0].symmetric_contractions.contraction_degree
+
+    # manual 
+    contraction_cls = "SymmetricContraction"
+    contraction_cls_first = "SymmetricContraction"
+
+    v_max = getattr(model, "v_max", None)
+    if isinstance(v_max, torch.Tensor):
+        v_max = v_max.detach().cpu().tolist()
+
+    num_vec_radial_basis = getattr(model, "num_vec_radial_basis", None)
+    if isinstance(num_vec_radial_basis, torch.Tensor):
+        num_vec_radial_basis = int(num_vec_radial_basis.item())
+    elif num_vec_radial_basis is None and hasattr(model, "vec_radial_embedding"):
+        num_vec_radial_basis = int(model.vec_radial_embedding.num_basis)
+
+    max_v_ell = getattr(model, "max_v_ell", None)
+    if isinstance(max_v_ell, torch.Tensor):
+        max_v_ell = int(max_v_ell.item())
+    elif max_v_ell is None:
+        if getattr(model, "vec_spherical_harmonics", None) is not None:
+            max_v_ell = int(model.vec_spherical_harmonics._lmax)
+        elif hasattr(model, "vec_solid_harmonics"):
+            max_v_ell = int(model.vec_solid_harmonics.SH_lmax())
+        else:
+            raise RuntimeError("Could not infer max_v_ell from model (vec_spherical_harmonics/vec_solid_harmonics missing).")
+
     config = {
         "r_max": model.r_max.item(),
         "num_bessel": len(model.radial_embedding.bessel_fn.bessel_weights),
@@ -292,6 +318,13 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         "atomic_inter_scale": scale.cpu().numpy(),
         "atomic_inter_shift": shift.cpu().numpy(),
         "heads": heads,
+        # for vectorial mace
+        "v_max": v_max,
+        "num_vec_radial_basis": num_vec_radial_basis,
+        "max_v_ell": max_v_ell,
+        "contraction_cls": "SymmetricContraction",
+        "contraction_cls_first": "SymmetricContraction",
+
     }
     return config
 

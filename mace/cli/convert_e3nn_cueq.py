@@ -30,6 +30,14 @@ def get_transfer_keys(num_layers: int) -> List[str]:
             f"interactions.{j}.skip_tp.weight",
             f"products.{j}.linear.weight",
         ]
+    ] + [
+        s
+        for j in range(num_layers)
+        for s in [
+            f"interactions.{j}.vec_linear.weight",
+            f"interactions.{j}.vec_skip_tp.weight",
+            f"products.{j}.linear_ori.weight",
+        ]
     ]
 
 
@@ -82,39 +90,61 @@ def transfer_weights(
     source_dict = source_model.state_dict()
     target_dict = target_model.state_dict()
 
-    # Transfer main weights
-    transfer_keys = get_transfer_keys(num_layers)
-    for key in transfer_keys:
-        if key in source_dict:  # Check if key exists
-            target_dict[key] = source_dict[key]
+    # # Transfer main weights
+    # transfer_keys = get_transfer_keys(num_layers)
+    # for key in transfer_keys:
+    #     if key in source_dict:  # Check if key exists
+    #         target_dict[key] = source_dict[key]
+    #     else:
+    #         logging.warning(f"Key {key} not found in source model")
+
+    # # Transfer symmetric contractions
+    # transfer_symmetric_contractions(
+    #     source_dict, target_dict, max_L, correlation, num_layers
+    # )
+    # print(source_dict.keys())
+
+    # # Unsqueeze linear and skip_tp layers
+    # for key in source_dict.keys():
+    #     if any(x in key for x in ["linear", "skip_tp"]) and "weight" in key:
+    #         target_dict[key] = target_dict[key].unsqueeze(0)
+
+    # transferred_keys = set(transfer_keys)
+    # remaining_keys = (
+    #     set(source_dict.keys()) & set(target_dict.keys()) - transferred_keys
+    # )
+    # remaining_keys = {k for k in remaining_keys if "symmetric_contraction" not in k}
+    # if remaining_keys:
+    #     for key in remaining_keys:
+    #         if source_dict[key].shape == target_dict[key].shape:
+    #             logging.debug(f"Transferring additional key: {key}")
+    #             target_dict[key] = source_dict[key]
+    #         else:
+    #             logging.warning(
+    #                 f"Shape mismatch for key {key}: "
+    #                 f"source {source_dict[key].shape} vs target {target_dict[key].shape}"
+    #
+    #           )
+
+    for k, sv in source_dict.items():
+        if k not in target_dict:
+            continue
+
+        tv = target_dict[k]
+
+        if sv.shape == tv.shape:
+            target_dict[k] = sv
+        elif sv.ndim == tv.ndim + 1 and sv.shape[0] == 1 and sv.squeeze(0).shape == tv.shape:
+            # checkpoint has [1, ...] but target expects [...]
+            target_dict[k] = sv.squeeze(0)
+        elif tv.ndim == sv.ndim + 1 and tv.shape[0] == 1 and sv.unsqueeze(0).shape == tv.shape:
+            # target expects [1, ...] but checkpoint has [...]
+            target_dict[k] = sv.unsqueeze(0)
         else:
-            logging.warning(f"Key {key} not found in source model")
-
-    # Transfer symmetric contractions
-    transfer_symmetric_contractions(
-        source_dict, target_dict, max_L, correlation, num_layers
-    )
-
-    # Unsqueeze linear and skip_tp layers
-    for key in source_dict.keys():
-        if any(x in key for x in ["linear", "skip_tp"]) and "weight" in key:
-            target_dict[key] = target_dict[key].unsqueeze(0)
-
-    transferred_keys = set(transfer_keys)
-    remaining_keys = (
-        set(source_dict.keys()) & set(target_dict.keys()) - transferred_keys
-    )
-    remaining_keys = {k for k in remaining_keys if "symmetric_contraction" not in k}
-    if remaining_keys:
-        for key in remaining_keys:
-            if source_dict[key].shape == target_dict[key].shape:
-                logging.debug(f"Transferring additional key: {key}")
-                target_dict[key] = source_dict[key]
-            else:
-                logging.warning(
-                    f"Shape mismatch for key {key}: "
-                    f"source {source_dict[key].shape} vs target {target_dict[key].shape}"
-                )
+            logging.warning(
+                f"Skipping {k}: source {tuple(sv.shape)} vs target {tuple(tv.shape)}"
+            )
+            
     # Transfer avg_num_neighbors
     for i in range(2):
         target_model.interactions[i].avg_num_neighbors = source_model.interactions[
@@ -156,7 +186,12 @@ def run(
         group="O3_e3nn",
         optimize_all=True,
     )
-
+    # remove vectorial model configuration if the model is not vectorial
+    if "Vectorial" not in str(source_model.__class__):
+        config.pop("v_max", None)
+        config.pop("max_v_ell", None)
+        config.pop("num_vec_radial_basis", None)
+        
     # Create new model with cuequivariance config
     logging.info("Creating new model with cuequivariance settings")
     target_model = source_model.__class__(**config).to(device)
