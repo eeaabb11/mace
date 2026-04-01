@@ -172,6 +172,9 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default="RealAgnosticResidualInteractionBlock",
         choices=[
             "RealAgnosticResidualInteractionBlock",
+            "RealAgnosticAttentionGateResidualInteractionBlock",
+            "RealAgnosticFullAttentionResidualInteractionBlock",
+            "RealAgnosticLocalAttentionResidualInteractionBlock",
             "RealAgnosticAttResidualInteractionBlock",
             "RealAgnosticInteractionBlock",
             "RealAgnosticDensityInteractionBlock",
