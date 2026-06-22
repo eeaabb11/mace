@@ -1,13 +1,26 @@
 import ast
 import logging
+from collections import defaultdict
 
 import numpy as np
+import torch
 from e3nn import o3
 
 from mace import modules
 from mace.tools.finetuning_utils import load_foundations_elements
 from mace.tools.scripts_utils import extract_config_mace_model
 from mace.tools.utils import AtomicNumberTable
+
+
+def _compute_vec_max(train_loader, n_species: int, eps: float = 1e-6):
+    """Compute per-species 1.2x max ||vec|| from the training set."""
+    species_mags = defaultdict(list)
+    for batch in train_loader:
+        species = torch.argmax(batch["node_attrs"], dim=1)
+        mags = torch.norm(batch["vecs"], dim=-1)
+        for z, m in zip(species.tolist(), mags.tolist()):
+            species_mags[z].append(m)
+    return [1.2 * max(species_mags.get(z, [1.0])) + eps for z in range(n_species)]
 
 
 def configure_model(
@@ -81,6 +94,7 @@ def configure_model(
         )
         args.mean = 0.0
         atomic_energies = 0.0
+        args.vec_max = _compute_vec_max(train_loader, n_species=len(z_table))
 
     # Build model
     if model_foundation is not None and args.model in ["MACE", "ScaleShiftMACE"]:
@@ -272,6 +286,8 @@ def _build_model(
             v_max=args.v_max,
             max_v_ell=args.max_v_ell,
             num_vec_radial_basis=args.num_vec_radial_basis,
+            staged_delta_training=getattr(args, "staged_delta_training", False),
+            vec_max=getattr(args, "vec_max", None),
         )
     if args.model == "FoundationMACE":
         return modules.ScaleShiftMACE(**model_config_foundation)

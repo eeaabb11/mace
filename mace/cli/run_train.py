@@ -812,6 +812,17 @@ def run(args) -> None:
         return
 
 
+    alpha_schedule = None
+    if getattr(args, "staged_delta_training", False):
+        alpha_schedule = tools.AlphaSchedule(
+            patience=args.alpha_patience,
+            ramp_epochs=args.alpha_ramp_epochs,
+        )
+        logging.info(
+            f"Staged delta training enabled: patience={args.alpha_patience}, "
+            f"ramp_epochs={args.alpha_ramp_epochs}, lr_factor={args.alpha_lr_factor}"
+        )
+
     tools.train(
         model=model,
         loss_fn=loss_fn,
@@ -838,6 +849,8 @@ def run(args) -> None:
         plotter=plotter,
         train_sampler=train_sampler,
         rank=rank,
+        alpha_schedule=alpha_schedule,
+        alpha_lr_factor=getattr(args, "alpha_lr_factor", 10.0),
     )
 
     logging.info("")

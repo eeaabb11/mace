@@ -887,6 +887,8 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
         atomic_inter_shift: float,
         contraction_cls: str = str,
         contraction_cls_first: str = str,
+        staged_delta_training: bool = False,
+        vec_max: Optional[List[float]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -903,6 +905,19 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
 
         self.vec_readouts = None
         self.vec_products = None
+
+        initial_alpha = 0.0 if staged_delta_training else 1.0
+        self.register_buffer("alpha", torch.tensor(initial_alpha))
+
+        n_species = len(kwargs.get("atomic_numbers", [1]))
+        if vec_max is None:
+            vec_max = [1.0] * n_species
+        self.register_buffer(
+            "vec_max", torch.tensor(vec_max, dtype=torch.get_default_dtype())
+        )
+
+    def set_alpha(self, value: float) -> None:
+        self.alpha.fill_(value)
 
     def forward(
         self,
@@ -942,31 +957,18 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
         edge_feats = self.radial_embedding(
             lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
         )
-            # --- vectorial stuffs ---
-        senders = data["edge_index"][0]
-        receivers = data["edge_index"][1]
-        vec = data["vecs"] # Get per-particle vectors
-        vec_ij = vec[receivers] - vec[senders] # Compute relative vector: v_ij = v_j - v_i
-        vec_lengths = torch.norm(vec_ij, dim=-1, keepdim=True)  # (n_edges, 1) # Then compute the lengths
+        # --- vectorial stuffs ---
+        alpha = getattr(self, "alpha", torch.tensor(1.0, device=data["vecs"].device))
+        vec = data["vecs"] * alpha  # alpha=0 zeroes delta during phase 1
 
-        # Normalize the vectors
-        vec_unit = vec_ij / (vec_lengths + 1e-9)
+        vec_lengths = torch.norm(vec, dim=-1, keepdim=True)             # (n_atoms, 1)
+        element_dependent_scaling = self.vec_max[
+            torch.argmax(data["node_attrs"], dim=1)
+        ].unsqueeze(-1)                                                  # (n_atoms, 1)
+        vec_lengths_trans = 1.0 - 2.0 * (vec_lengths / element_dependent_scaling) ** 2
 
-        # Compute the SOLID harmonics from the normalized vectors
-        vec_edge_attrs_raw = self.vec_solid_harmonics(vec_unit) # switched from vec_vectors, nope
-
-    
-        # Replace output with 1 when the magnitude is 0, preserving gradient flow
-        # is_zero_vec = (vec_lengths < 1e-8).view(-1, *[1]*(vec_node_attrs_raw.ndim - 1))  # shape broadcast
-        # vec_node_attrs = torch.where(is_zero_vec, torch.ones_like(vec_node_attrs_raw), vec_node_attrs_raw)
-
-        # Radial embedding for vectorial features
-        # make vec_lengths scaled so they are mostly in the range of (-1, 1) for the Chebychev basis, and dont blow up.
-        scale = torch.quantile(vec_lengths.detach().flatten(), 0.95).clamp_min(1e-6) # scale based on 95th percentile to avoid outliers dominating, and clamp to avoid division by zero
-
-        t = (vec_lengths / (scale + 1e-9)).clamp(0.0, 1.0)   # t in [0,1]
-        vec_lengths_trans = 1.0 - 2.0 * (t ** 2)             # in [-1,1]
-        vec_edge_feats = self.vec_radial_embedding(vec_lengths_trans) # (n_nodes, n_basis)
+        vec_node_attrs = self.vec_solid_harmonics(vec)                   # (n_atoms, n_harmonics)
+        vec_node_feats = self.vec_radial_embedding(vec_lengths_trans)    # (n_atoms, n_basis)
 
 
         # -- INTERACTION --
@@ -981,8 +983,8 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
                 edge_attrs=edge_attrs,
                 edge_feats=edge_feats,
                 edge_index=data["edge_index"],
-                vec_edge_inv_feats=vec_edge_feats,
-                vec_edge_attrs=vec_edge_attrs_raw,
+                vec_edge_inv_feats=vec_node_feats,
+                vec_edge_attrs=vec_node_attrs,
             )
 
             # print(f"node_feats: {node_feats}")
@@ -993,8 +995,8 @@ class VectorialAtomicTargetsSolidHarmonicsSelfVecMACE(VectorialMACE):
                 node_feats=node_feats, 
                 sc=sc, 
                 node_attrs=data["node_attrs"],
-                vec_edge_inv_feats=vec_edge_feats,
-                vec_edge_attrs=vec_edge_attrs_raw,
+                vec_edge_inv_feats=vec_node_feats,
+                vec_edge_attrs=vec_node_attrs,
             )
             node_feats_list.append(node_feats)
 

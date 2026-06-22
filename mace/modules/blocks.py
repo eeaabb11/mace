@@ -925,24 +925,10 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         num_nodes = node_feats.shape[0]
         node_feats = self.linear_up(node_feats)
         
-        # boardcast node feats to number of nodes
-        #vec_inv_feats_j = vec_edge_inv_feats[sender] # remove sender in future!!!!!
-        vec_inv_feats_j = vec_edge_inv_feats
+        vec_inv_feats_j = vec_edge_inv_feats[sender]
 
         
         edge_feats_with_vec = torch.cat([edge_feats, vec_inv_feats_j], dim=-1)
-
-        # print("edge_feats: ", edge_feats)
-        # min_edge_feats = torch.min(edge_feats)
-        # print("min_edge_feats: ", min_edge_feats)
-        # max_edge_feats = torch.max(edge_feats)
-        # print("max_edge_feats: ", max_edge_feats)
-
-        # print("vec_edge_inv_feats: ", vec_edge_inv_feats)
-        # min_vec_edge_inv_feats = torch.min(vec_edge_inv_feats)
-        # print("min_vec_edge_inv_feats: ", min_vec_edge_inv_feats)
-        # max_vec_edge_inv_feats = torch.max(vec_edge_inv_feats)
-        # print("max_vec_edge_inv_feats: ", max_vec_edge_inv_feats)
 
         
         # combined learnable radial
@@ -963,7 +949,7 @@ class VectorialRealAgnosticDensityInteractionBlock(VectorialInteractionBlock):
         tp_weights_vec = self.conv_tp_weights_vec(edge_feats_with_vec)
         
         vec_mji = self.vec_conv_tp(
-            mji, vec_edge_attrs, tp_weights_vec
+            mji, vec_edge_attrs[sender], tp_weights_vec
         )  # [n_edges, irreps]
 
         # max_abs_vec = torch.max(torch.abs(vec_mji))

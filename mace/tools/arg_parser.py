@@ -865,8 +865,32 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--train_one_body_contribution",
         type=str2bool,
         default=True
-    )  
- 
+    )
+    parser.add_argument(
+        "--staged_delta_training",
+        help="Start with delta (vecs) zeroed and ramp in gradually after phase-1 plateau",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--alpha_patience",
+        help="Epochs without val_loss improvement before starting delta ramp (staged_delta_training)",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "--alpha_ramp_epochs",
+        help="Epochs over which alpha ramps 0→1 via cosine schedule (staged_delta_training)",
+        type=int,
+        default=20,
+    )
+    parser.add_argument(
+        "--alpha_lr_factor",
+        help="Factor to divide LR by when the delta ramp begins (staged_delta_training)",
+        type=float,
+        default=10.0,
+    )
+
     return parser
 
 

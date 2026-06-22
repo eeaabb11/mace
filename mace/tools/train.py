@@ -44,6 +44,68 @@ class SWAContainer:
     loss_fn: torch.nn.Module
 
 
+class AlphaSchedule:
+    """Two-phase delta curriculum: phase 1 alpha=0 until plateau, phase 2 cosine ramp to 1.
+
+    Call step(val_loss) after each validation epoch. Returns (alpha, phase_str).
+    Phase strings: "structural" → "ramping" → "full".
+    """
+
+    def __init__(self, patience: int = 10, ramp_epochs: int = 20):
+        self.patience = patience
+        self.ramp_epochs = ramp_epochs
+        self._best_loss = np.inf
+        self._stall_count = 0
+        self._ramp_step = 0
+        self._ramping = False
+        self._done = False
+        self._plateau_just_detected = False
+        self.alpha = 0.0
+
+    @property
+    def phase(self) -> str:
+        if self._done:
+            return "full"
+        if self._ramping:
+            return "ramping"
+        return "structural"
+
+    @property
+    def plateau_just_detected(self) -> bool:
+        """True exactly on the call to step() that first triggers the ramp."""
+        return self._plateau_just_detected
+
+    def step(self, val_loss: float) -> float:
+        self._plateau_just_detected = False
+
+        if self._done:
+            self.alpha = 1.0
+            return self.alpha
+
+        if not self._ramping:
+            if val_loss < self._best_loss:
+                self._best_loss = val_loss
+                self._stall_count = 0
+            else:
+                self._stall_count += 1
+
+            if self._stall_count >= self.patience:
+                self._ramping = True
+                self._ramp_step = 1
+                self._plateau_just_detected = True
+
+        if self._ramping:
+            # cosine ramp: alpha = 0.5 * (1 - cos(pi * t)) with t in [0,1]
+            t = min(self._ramp_step / self.ramp_epochs, 1.0)
+            self.alpha = 0.5 * (1.0 - np.cos(np.pi * t))
+            self._ramp_step += 1
+            if t >= 1.0:
+                self.alpha = 1.0
+                self._done = True
+
+        return self.alpha
+
+
 def valid_err_log(
     valid_loss,
     eval_metrics,
@@ -169,12 +231,15 @@ def train(
     distributed_model: Optional[DistributedDataParallel] = None,
     train_sampler: Optional[DistributedSampler] = None,
     rank: Optional[int] = 0,
+    alpha_schedule: Optional["AlphaSchedule"] = None,
+    alpha_lr_factor: float = 10.0,
 ):
     lowest_loss = np.inf
     valid_loss = np.inf
     patience_counter = 0
     swa_start = True
     keep_last = False
+    skip_patience_this_epoch = False  # set True on the epoch plateau fires
     if log_wandb:
         import wandb
 
@@ -291,7 +356,43 @@ def train(
                 )
             if log_wandb:
                 wandb.log(wandb_log_dict)
-            if rank == 0:
+            # --- staged delta curriculum ---
+            if alpha_schedule is not None and rank == 0:
+                new_alpha = alpha_schedule.step(valid_loss)
+                if alpha_schedule.plateau_just_detected:
+                    logging.info(
+                        f"Epoch {epoch}: phase-1 plateau detected after "
+                        f"{alpha_schedule.patience} stall epochs. "
+                        "Saving plateau checkpoint and dropping LR before ramp."
+                    )
+                    param_context = (
+                        ema.average_parameters() if ema is not None else nullcontext()
+                    )
+                    with param_context:
+                        checkpoint_handler.save(
+                            state=CheckpointState(model, optimizer, lr_scheduler),
+                            epochs=epoch,
+                            keep_last=True,
+                        )
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = pg["lr"] / alpha_lr_factor
+                    logging.info(
+                        f"LR dropped by {alpha_lr_factor}x to "
+                        f"{optimizer.param_groups[0]['lr']:.2e}"
+                    )
+                    lowest_loss = np.inf
+                    patience_counter = 0
+                    skip_patience_this_epoch = True
+                    logging.info("Reset lowest_loss and patience for phase-2 delta training.")
+                if hasattr(model, "set_alpha"):
+                    model.set_alpha(new_alpha)
+                current_lr = optimizer.param_groups[0]["lr"]
+                logging.info(
+                    f"Epoch {epoch} | phase={alpha_schedule.phase} "
+                    f"alpha={new_alpha:.4f} lr={current_lr:.2e} "
+                    f"val_loss={valid_loss:.6f}"
+                )
+            if rank == 0 and not skip_patience_this_epoch:
                 if valid_loss >= lowest_loss:
                     patience_counter += 1
                     if patience_counter >= patience:
@@ -330,6 +431,7 @@ def train(
                             keep_last=keep_last,
                         )
                         keep_last = False or save_all_checkpoints
+        skip_patience_this_epoch = False
         if distributed:
             torch.distributed.barrier()
         epoch += 1
