@@ -144,7 +144,15 @@ def transfer_weights(
             logging.warning(
                 f"Skipping {k}: source {tuple(sv.shape)} vs target {tuple(tv.shape)}"
             )
-            
+
+    # Transfer symmetric contraction weights: e3nn splits these into per-degree
+    # "weights_max"/"weights.0"/"weights.1" tensors, while cuequivariance stores a
+    # single combined "symmetric_contractions.weight" tensor per product block under a
+    # different key name, so the generic name-matching loop above silently skips them.
+    transfer_symmetric_contractions(
+        source_dict, target_dict, max_L, correlation, num_layers
+    )
+
     # Transfer avg_num_neighbors
     for i in range(2):
         target_model.interactions[i].avg_num_neighbors = source_model.interactions[
