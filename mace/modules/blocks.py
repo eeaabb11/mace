@@ -872,6 +872,8 @@ class RealAgnosticResidualMultiHeadAttentionInteractionBlock(InteractionBlock):
         # Pre-declared (rather than only assigned inside `if not self.training`)
         # so TorchScript knows these debug attributes exist ahead of time.
         self.last_alpha = torch.zeros(1, num_heads)
+        self.last_raw_scores = torch.zeros(1, num_heads)
+        self.last_mji_norm = torch.zeros(1)
         self.last_receiver = torch.zeros(1, dtype=torch.long)
         self.last_sender = torch.zeros(1, dtype=torch.long)
 
@@ -940,6 +942,14 @@ class RealAgnosticResidualMultiHeadAttentionInteractionBlock(InteractionBlock):
 
         if not self.training:
             self.last_alpha = alpha.detach()
+            # Pre-softmax scores, useful for comparing attention "intensity"
+            # across atoms with different neighbor counts (alpha alone is
+            # normalized within each receiver's own neighborhood, so it can't
+            # tell you whether an atom's attention is generally strong or weak).
+            self.last_raw_scores = raw_scores.detach()
+            # Norm of the unweighted pairwise embedding, to check whether
+            # attention is doing more than just tracking message magnitude.
+            self.last_mji_norm = mji.pow(2).sum(dim=-1).sqrt().detach()
             self.last_receiver = receiver.detach()
             self.last_sender = sender.detach()
 
