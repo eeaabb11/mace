@@ -737,11 +737,231 @@ class RealAgnosticResidualGeometricAttentionInteractionBlock(InteractionBlock):
         node_attrs = self.truncate_ghosts(node_attrs, n_real)
         sc = self.truncate_ghosts(sc, n_real)
  
-        message = self.linear(message) / self.avg_num_neighbors  
+        message = self.linear(message) / self.avg_num_neighbors
         return (
             self.reshape(message),
             sc,
         )  # [n_nodes, channels, (lmax + 1)**2]
+
+
+def _common_irrep_types(irreps_a: o3.Irreps, irreps_b: o3.Irreps) -> List[o3.Irrep]:
+    """Distinct (l, parity) irrep types present in both `irreps_a` and `irreps_b`,
+    in the order they first appear in `irreps_a`.
+
+    An equivariant linear map can only connect matching irrep types, so the
+    attention query/key projections below may only be built out of irrep
+    types that exist on both sides of the map.
+    """
+    types_b = {ir for _, ir in irreps_b}
+    seen = set()
+    common: List[o3.Irrep] = []
+    for _, ir in irreps_a:
+        if ir in types_b and ir not in seen:
+            seen.add(ir)
+            common.append(ir)
+    if not common:
+        raise ValueError(
+            f"No shared irrep types between {irreps_a} and {irreps_b}; cannot "
+            "build equivariant attention query/key projections."
+        )
+    return common
+
+
+@compile_mode("script")
+class RealAgnosticResidualMultiHeadAttentionInteractionBlock(InteractionBlock):
+    """Geometric multi-head self-attention interaction block.
+
+    Follows Norwood, Schaaf, Batatia, Csanyi & Bhowmik, "Enhancing the local
+    expressivity of geometric graph neural networks" (NeurIPS 2023 ML4PS
+    workshop), Eqns. 5-6, more closely than
+    `RealAgnosticResidualGeometricAttentionInteractionBlock`:
+
+    - Eq. 5 scores attention on the *full* equivariant node features h_i and
+      pairwise embedding phi_ij (all l, not just their l=0/scalar slices).
+      Query/key projections W_Q, W_K are *equivariant* linear maps (not plain
+      `nn.Linear` restricted to invariant channels), and the similarity score
+      is an equivariant inner product: summing the elementwise product of two
+      tensors transforming under the same irreps is O(3)-invariant, since
+      O(3) irreps are orthogonal representations (D^l(R)^T D^l(R) = I).
+    - Eq. 6 uses multiple parallel attention heads mu, each producing its own
+      attention-weighted aggregate of phi_ij, concatenated (oplus) along the
+      channel axis before the shared self-interaction weight W (`self.linear`)
+      is applied.
+
+    W_Q and W_K are implemented as single equivariant `Linear` layers whose
+    output multiplicity is `attention_dim * num_heads`; splitting that
+    multiplicity into `num_heads` contiguous groups is mathematically
+    equivalent to having `num_heads` independently-parameterised W_Q^mu,
+    W_K^mu, since every output channel is already an independently learned
+    linear combination of the input.
+    """
+
+    def _setup(self, attention_dim: int = 16, num_heads: int = 4) -> None:
+        if not hasattr(self, "cueq_config"):
+            self.cueq_config = None
+
+        # ---- Same base layers as RealAgnosticResidualInteractionBlock ----
+        self.linear_up = Linear(
+            self.node_feats_irreps,
+            self.node_feats_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+        irreps_mid, instructions = tp_out_irreps_with_instructions(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            self.target_irreps,
+        )
+        self.conv_tp = TensorProduct(
+            self.node_feats_irreps,
+            self.edge_attrs_irreps,
+            irreps_mid,
+            instructions=instructions,
+            shared_weights=False,
+            internal_weights=False,
+            cueq_config=self.cueq_config,
+        )
+        input_dim = self.edge_feats_irreps.num_irreps
+        self.conv_tp_weights = nn.FullyConnectedNet(
+            [input_dim] + self.radial_MLP + [self.conv_tp.weight_numel],
+            torch.nn.functional.silu,
+        )
+
+        self.skip_tp = FullyConnectedTensorProduct(
+            self.node_feats_irreps,
+            self.node_attrs_irreps,
+            self.hidden_irreps,
+            cueq_config=self.cueq_config,
+        )
+
+        # ---- Multi-head geometric attention (paper Eq. 5-6) ----
+        self.num_heads = num_heads
+        self.attention_dim = attention_dim
+        self._n_mid = irreps_mid.dim
+
+        common_irs = _common_irrep_types(self.node_feats_irreps, irreps_mid)
+        attn_irreps = o3.Irreps([(attention_dim * num_heads, ir) for ir in common_irs])
+
+        # Equivariant query/key projections (Eq. 5's W_Q, W_K), all heads at once.
+        self.W_Q = Linear(
+            self.node_feats_irreps,
+            attn_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+        self.W_K = Linear(
+            irreps_mid,
+            attn_irreps,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+        # Groups the flat Q/K output into [n, mul_total, sum_of_ir_dims] so the
+        # mul axis (= num_heads * attention_dim) can be split by head below.
+        self.reshape_attn = reshape_irreps(attn_irreps, cueq_config=self.cueq_config)
+        self._attn_feat_dim = sum(ir.dim for ir in common_irs)
+        # NOTE: paper's Eq. 5 has no explicit 1/sqrt(d) term before the softmax;
+        # this scaling is added (standard scaled-dot-product-attention practice)
+        # to stop logits from growing with per-head dimensionality and saturating
+        # the softmax. Scale by the full per-head vector size (channels x angular
+        # components), matching the dimensionality actually being dotted below.
+        self.attn_scale: float = (attention_dim * self._attn_feat_dim) ** -0.5
+
+        # Pre-declared (rather than only assigned inside `if not self.training`)
+        # so TorchScript knows these debug attributes exist ahead of time.
+        self.last_alpha = torch.zeros(1, num_heads)
+        self.last_receiver = torch.zeros(1, dtype=torch.long)
+        self.last_sender = torch.zeros(1, dtype=torch.long)
+
+        # Eq. 6's self-interaction weight W, now over head-concatenated
+        # pairwise embeddings (irreps_mid repeated once per head).
+        irreps_multi_head = irreps_mid
+        for _ in range(num_heads - 1):
+            irreps_multi_head = irreps_multi_head + irreps_mid
+        self.irreps_out = self.target_irreps
+        self.linear = Linear(
+            irreps_multi_head,
+            self.irreps_out,
+            internal_weights=True,
+            shared_weights=True,
+            cueq_config=self.cueq_config,
+        )
+        self.reshape = reshape_irreps(self.irreps_out, cueq_config=self.cueq_config)
+
+    def forward(
+        self,
+        node_attrs: torch.Tensor,
+        node_feats: torch.Tensor,
+        edge_attrs: torch.Tensor,
+        edge_feats: torch.Tensor,
+        edge_index: torch.Tensor,
+        lammps_class: Optional[Any] = None,
+        lammps_natoms: Tuple[int, int] = (0, 0),
+        first_layer: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        sender = edge_index[0]
+        receiver = edge_index[1]
+        num_nodes = node_feats.shape[0]
+        num_edges = edge_index.shape[1]
+        n_real = lammps_natoms[0] if lammps_class is not None else None
+        sc = self.skip_tp(node_feats, node_attrs)
+
+        node_feats = self.linear_up(node_feats)
+        node_feats = self.handle_lammps(
+            node_feats,
+            lammps_class=lammps_class,
+            lammps_natoms=lammps_natoms,
+            first_layer=first_layer,
+        )
+
+        # Pairwise embedding phi_ij (paper Eq. 1)
+        tp_weights = self.conv_tp_weights(edge_feats)
+        mji = self.conv_tp(
+            node_feats[sender], edge_attrs, tp_weights
+        )  # [n_edges, irreps_mid]
+
+        # --- Multi-head geometric attention (Eq. 5) ---
+        q = self.reshape_attn(self.W_Q(node_feats)).reshape(
+            num_nodes, self.num_heads, self.attention_dim, self._attn_feat_dim
+        )
+        k = self.reshape_attn(self.W_K(mji)).reshape(
+            num_edges, self.num_heads, self.attention_dim, self._attn_feat_dim
+        )
+
+        # Equivariant inner product <W_Q h_i, W_K phi_ij>: summing across the
+        # (channel, m) axes of matching irreps is O(3)-invariant.
+        raw_scores = (
+            q[receiver] * k
+        ).sum(dim=[-1, -2]) * self.attn_scale  # [n_edges, num_heads]
+
+        alpha = scatter_softmax(raw_scores, receiver, num_nodes=num_nodes)  # [n_edges, num_heads]
+
+        if not self.training:
+            self.last_alpha = alpha.detach()
+            self.last_receiver = receiver.detach()
+            self.last_sender = sender.detach()
+
+        # Eq. 6: weight phi_ij per head, then concatenate heads (oplus) along
+        # the channel axis before the shared self-interaction weight W.
+        mji_per_head = mji.unsqueeze(1) * alpha.unsqueeze(-1)  # [n_edges, num_heads, irreps_mid]
+        mji_multi_head = mji_per_head.reshape(num_edges, self.num_heads * self._n_mid)
+
+        message = scatter_sum(
+            src=mji_multi_head, index=receiver, dim=0, dim_size=num_nodes
+        )  # [n_nodes, num_heads * irreps_mid]
+
+        message = self.truncate_ghosts(message, n_real)
+        node_attrs = self.truncate_ghosts(node_attrs, n_real)
+        sc = self.truncate_ghosts(sc, n_real)
+
+        message = self.linear(message) / self.avg_num_neighbors
+        return (
+            self.reshape(message),
+            sc,
+        )  # [n_nodes, channels, (lmax + 1)**2]
+
 
 @compile_mode("script")
 class RealAgnosticAttentionGateResidualInteractionBlock(InteractionBlock):
