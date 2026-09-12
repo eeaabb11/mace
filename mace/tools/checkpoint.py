@@ -151,6 +151,20 @@ class CheckpointIO:
             )
         return latest_checkpoint_info.path
 
+    def clear(self) -> None:
+        """Remove all checkpoint files matching this tag.
+
+        A fresh (non-restart) run must not let a stale checkpoint from an
+        earlier, unrelated training session (same tag, higher epoch number)
+        get picked up by `_get_latest_checkpoint_path`'s max-epoch selection
+        once this run finishes.
+        """
+        for path in self._list_file_paths():
+            info = self._parse_checkpoint_path(path)
+            if info and info.tag == self.tag:
+                logging.debug(f"Removing stale checkpoint: {path}")
+                os.remove(path)
+
     def save(
         self, checkpoint: Checkpoint, epochs: int, keep_last: bool = False
     ) -> None:
@@ -199,6 +213,9 @@ class CheckpointHandler:
     ) -> None:
         checkpoint = self.builder.create_checkpoint(state)
         self.io.save(checkpoint, epochs, keep_last)
+
+    def clear(self) -> None:
+        self.io.clear()
 
     def load_latest(
         self,

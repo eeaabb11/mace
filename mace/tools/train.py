@@ -233,6 +233,7 @@ def train(
     rank: Optional[int] = 0,
     alpha_schedule: Optional["AlphaSchedule"] = None,
     alpha_lr_factor: float = 10.0,
+    step_log_interval: int = 0,
 ):
     lowest_loss = np.inf
     valid_loss = np.inf
@@ -304,6 +305,7 @@ def train(
             distributed=distributed,
             distributed_model=distributed_model,
             rank=rank,
+            step_log_interval=step_log_interval,
         )
         if distributed:
             torch.distributed.barrier()
@@ -393,6 +395,13 @@ def train(
                     f"val_loss={valid_loss:.6f}"
                 )
             if rank == 0 and not skip_patience_this_epoch:
+                if not np.isfinite(valid_loss):
+                    logging.warning(
+                        f"Non-finite validation loss at epoch {epoch}; stopping "
+                        "optimization without checkpointing this epoch (model weights "
+                        "have diverged and will not recover)."
+                    )
+                    break
                 if valid_loss >= lowest_loss:
                     patience_counter += 1
                     if patience_counter >= patience:
@@ -453,6 +462,7 @@ def train_one_epoch(
     distributed: bool,
     distributed_model: Optional[DistributedDataParallel] = None,
     rank: Optional[int] = 0,
+    step_log_interval: int = 0,
 ) -> None:
     model_to_train = model if distributed_model is None else distributed_model
 
@@ -474,7 +484,7 @@ def train_one_epoch(
         if rank == 0:
             logger.log(opt_metrics)
     else:
-        for batch in data_loader:
+        for step, batch in enumerate(data_loader):
             _, opt_metrics = take_step(
                 model=model_to_train,
                 loss_fn=loss_fn,
@@ -489,6 +499,18 @@ def train_one_epoch(
             opt_metrics["epoch"] = epoch
             if rank == 0:
                 logger.log(opt_metrics)
+                loss_val = float(opt_metrics["loss"])
+                grad_norm = opt_metrics.get("grad_norm", float("nan"))
+                if not np.isfinite(loss_val) or not np.isfinite(grad_norm):
+                    logging.warning(
+                        f"Non-finite value at epoch {epoch}, step {step}: "
+                        f"loss={loss_val}, grad_norm={grad_norm}"
+                    )
+                elif step_log_interval and step % step_log_interval == 0:
+                    logging.info(
+                        f"Epoch {epoch}, step {step}: loss={loss_val:.6f}, "
+                        f"grad_norm={grad_norm:.4f}"
+                    )
 
 
 def take_step(
@@ -504,6 +526,7 @@ def take_step(
     start_time = time.time()
     batch = batch.to(device)
     batch_dict = batch.to_dict()
+    _grad_norm = [None]
 
     def closure():
         optimizer.zero_grad(set_to_none=True)
@@ -517,7 +540,9 @@ def take_step(
         loss = loss_fn(pred=output, ref=batch)
         loss.backward()
         if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            _grad_norm[0] = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=max_grad_norm
+            )
 
         return loss
 
@@ -529,6 +554,9 @@ def take_step(
 
     loss_dict = {
         "loss": to_numpy(loss),
+        "grad_norm": (
+            float(_grad_norm[0]) if _grad_norm[0] is not None else float("nan")
+        ),
         "time": time.time() - start_time,
     }
 

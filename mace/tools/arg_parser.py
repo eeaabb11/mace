@@ -760,6 +760,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=10.0,
     )
     parser.add_argument(
+        "--step_log_interval",
+        help="Log loss and (pre-clip) gradient norm every N optimizer steps within "
+        "an epoch, and immediately warn on the first non-finite loss/grad_norm. "
+        "0 disables per-step logging (non-finite warnings still fire).",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
         "--dry_run",
         help="Run all steps upto training to test settings.",
         action="store_true",

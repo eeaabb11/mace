@@ -142,9 +142,12 @@ class MetricsLogger:
 
     def log(self, d: Dict[str, Any]) -> None:
         os.makedirs(name=self.directory, exist_ok=True)
+        # Single write call: if the process dies mid-write (e.g. OOM kill), a
+        # split write()+write("\n") can leave a line with no trailing newline,
+        # which then silently fuses with the next run's first line into one
+        # unparseable line.
         with open(self.path, mode="a", encoding="utf-8") as f:
-            f.write(json.dumps(d, cls=UniversalEncoder))
-            f.write("\n")
+            f.write(json.dumps(d, cls=UniversalEncoder) + "\n")
 
 
 # pylint: disable=abstract-method, arguments-differ

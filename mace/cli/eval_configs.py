@@ -169,13 +169,21 @@ def run(args: argparse.Namespace) -> None:
 
     elif "atomic_targets" in sample_output:
         atomic_targets_collection = []
-        for batch in data_loader:
-            batch = batch.to(device)
-            output = model(batch.to_dict())
+        # No gradients are needed for atomic-target inference, but the model
+        # unconditionally calls requires_grad_(True) on its inputs, so without
+        # no_grad() every iteration still builds a full autograd graph. Those
+        # graphs contain reference cycles that the refcounting GC can't
+        # collect immediately, so over hundreds of one-at-a-time structures
+        # they pile up and can exhaust GPU memory even though each individual
+        # graph is unused and would otherwise be freed right away.
+        with torch.no_grad():
+            for batch in data_loader:
+                batch = batch.to(device)
+                output = model(batch.to_dict())
 
-            # Atomic Targets
-            atomic_targets = np.split(torch_tools.to_numpy(output["atomic_targets"]), indices_or_sections=batch.ptr[1:], axis=0)
-            atomic_targets_collection.append(atomic_targets[:-1])  # drop last empty if any
+                # Atomic Targets
+                atomic_targets = np.split(torch_tools.to_numpy(output["atomic_targets"]), indices_or_sections=batch.ptr[1:], axis=0)
+                atomic_targets_collection.append(atomic_targets[:-1])  # drop last empty if any
         
         atomic_targets_list = [targets for targets_list in atomic_targets_collection for targets in targets_list]
         assert len(atoms_list) == len(atomic_targets_list)

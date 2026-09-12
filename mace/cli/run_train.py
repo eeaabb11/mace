@@ -731,6 +731,18 @@ def run(args) -> None:
     start_epoch = 0
     restart_lbfgs = False
     opt_start_epoch = None
+    if not args.restart_latest:
+        # A stale checkpoint left over from an earlier, unrelated run with the
+        # same tag (name+seed) but a higher epoch number would otherwise be
+        # silently picked up as "latest" by the post-training evaluation load
+        # below, even though this run never wrote it.
+        checkpoint_handler.clear()
+        # Likewise, the metrics log is opened in append mode: without
+        # clearing it, a fresh run's results get mixed with every past
+        # session's epochs (and any corrupted line left by a prior crash),
+        # which breaks plot_train.py and misrepresents this run's history.
+        if os.path.exists(logger.path):
+            os.remove(logger.path)
     if args.restart_latest:
         try:
             opt_start_epoch = checkpoint_handler.load_latest(
@@ -851,6 +863,7 @@ def run(args) -> None:
         rank=rank,
         alpha_schedule=alpha_schedule,
         alpha_lr_factor=getattr(args, "alpha_lr_factor", 10.0),
+        step_log_interval=args.step_log_interval,
     )
 
     logging.info("")
