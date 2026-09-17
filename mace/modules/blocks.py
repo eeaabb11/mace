@@ -974,6 +974,16 @@ class RealAgnosticResidualMultiHeadAttentionInteractionBlock(InteractionBlock):
 
 
 @compile_mode("script")
+class RealAgnosticResidualSingleHeadAttentionInteractionBlock(
+    RealAgnosticResidualMultiHeadAttentionInteractionBlock
+):
+    """`RealAgnosticResidualMultiHeadAttentionInteractionBlock` with `num_heads=1`."""
+
+    def _setup(self, attention_dim: int = 16, num_heads: int = 1) -> None:
+        super()._setup(attention_dim=attention_dim, num_heads=1)
+
+
+@compile_mode("script")
 class RealAgnosticAttentionGateResidualInteractionBlock(InteractionBlock):
     def _setup(self) -> None:
         if not hasattr(self, "cueq_config"):
