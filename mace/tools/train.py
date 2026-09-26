@@ -175,6 +175,9 @@ def train(
     patience_counter = 0
     swa_start = True
     keep_last = False
+    nan_rollbacks = 0
+    max_nan_rollbacks = 5
+    nan_lr_factor = 0.5
     if log_wandb:
         import wandb
 
@@ -292,6 +295,47 @@ def train(
             if log_wandb:
                 wandb.log(wandb_log_dict)
             if rank == 0:
+                if not np.isfinite(float(valid_loss)):
+                    # NaN compares False against lowest_loss, which would reset
+                    # patience and overwrite the last good checkpoint. Instead,
+                    # roll back to the last good checkpoint with a smaller lr.
+                    if nan_rollbacks >= max_nan_rollbacks:
+                        logging.error(
+                            f"Validation loss is {valid_loss} at epoch {epoch} after "
+                            f"{nan_rollbacks} rollbacks; stopping training"
+                        )
+                        break
+                    # loading the checkpoint restores its lr, so remember the
+                    # current one to keep halving across repeated rollbacks
+                    current_lrs = [group["lr"] for group in optimizer.param_groups]
+                    good_epoch = checkpoint_handler.load_latest(
+                        state=CheckpointState(model, optimizer, lr_scheduler),
+                        device=device,
+                    )
+                    if good_epoch is None:
+                        # fail instead of saving an untrained NaN model
+                        raise RuntimeError(
+                            f"Validation loss is {valid_loss} at epoch {epoch} and no "
+                            "checkpoint to roll back to; the model diverges from "
+                            "initialisation"
+                        )
+                    nan_rollbacks += 1
+                    for group, lr in zip(optimizer.param_groups, current_lrs):
+                        group["lr"] = lr * nan_lr_factor
+                    if ema is not None:
+                        # checkpoint holds EMA weights; restart EMA from them
+                        for shadow, param in zip(ema.shadow_params, model.parameters()):
+                            shadow.data.copy_(param.data)
+                    valid_loss = lowest_loss
+                    patience_counter = 0
+                    logging.warning(
+                        f"Validation loss is nan at epoch {epoch}; rolled back to epoch "
+                        f"{good_epoch} checkpoint and reduced lr to "
+                        f"{optimizer.param_groups[0]['lr']:.2e} "
+                        f"(rollback {nan_rollbacks}/{max_nan_rollbacks})"
+                    )
+                    epoch += 1
+                    continue
                 if valid_loss >= lowest_loss:
                     patience_counter += 1
                     if patience_counter >= patience:

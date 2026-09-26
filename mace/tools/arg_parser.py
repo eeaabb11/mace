@@ -260,6 +260,19 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=1,
     )
     parser.add_argument(
+        "--node_feats_norm",
+        help="RMS-normalise node features after each layer (AtomicTargetsMACE only)",
+        type=str2bool,
+        default=False,
+    )
+    parser.add_argument(
+        "--node_feats_norm_cap",
+        help="with --node_feats_norm, only shrink irrep blocks whose RMS exceeds this "
+        "value (0 = always normalise to unit RMS)",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--compute_avg_num_neighbors",
         help="normalization factor for the message",
         type=str2bool,

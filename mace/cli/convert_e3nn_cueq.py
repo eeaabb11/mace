@@ -126,6 +126,10 @@ def transfer_weights(
     # Filter out any keys not present in target model
     model_sd = target_model.state_dict()
     clean = {k: v for k, v in target_dict.items() if k in model_sd}
+    # cueq linear/skip_tp weights are [1, N] where e3nn has [N]
+    for k, v in clean.items():
+        if v.shape != model_sd[k].shape and v.numel() == model_sd[k].numel():
+            clean[k] = v.reshape(model_sd[k].shape)
 
     target_model.load_state_dict(clean, strict=False)
 

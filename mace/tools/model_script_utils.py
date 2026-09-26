@@ -246,6 +246,8 @@ def _build_model(
             radial_MLP=ast.literal_eval(args.radial_MLP),
             radial_type=args.radial_type,
             heads=heads,
+            node_feats_norm=args.node_feats_norm,
+            node_feats_norm_cap=args.node_feats_norm_cap,
         )
     if args.model == "AtomicTargetsMACE":
         return modules.AtomicTargetsMACE(
@@ -261,6 +263,8 @@ def _build_model(
             radial_MLP=ast.literal_eval(args.radial_MLP),
             radial_type=args.radial_type,
             heads=heads,
+            node_feats_norm=args.node_feats_norm,
+            node_feats_norm_cap=args.node_feats_norm_cap,
         )
     if args.model == "FoundationMACE":
         return modules.ScaleShiftMACE(**model_config_foundation)

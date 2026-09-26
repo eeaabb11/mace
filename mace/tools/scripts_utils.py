@@ -293,6 +293,12 @@ def extract_config_mace_model(model: torch.nn.Module) -> Dict[str, Any]:
         "atomic_inter_shift": shift.cpu().numpy(),
         "heads": heads,
     }
+    if hasattr(model, "node_norms"):
+        config["node_feats_norm"] = not isinstance(
+            model.node_norms[0], torch.nn.Identity
+        )
+        if config["node_feats_norm"]:
+            config["node_feats_norm_cap"] = getattr(model.node_norms[0], "cap", 0.0)
     return config
 
 
@@ -762,6 +768,14 @@ def get_params_options(
         amsgrad=args.amsgrad,
         betas=(args.beta, 0.999),
     )
+    if hasattr(model, "node_norms") and len(list(model.node_norms.parameters())) > 0:
+        param_options["params"].append(
+            {
+                "name": "node_norms",
+                "params": model.node_norms.parameters(),
+                "weight_decay": 0.0,
+            }
+        )
     return param_options
 
 

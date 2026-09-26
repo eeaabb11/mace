@@ -57,6 +57,41 @@ class LinearNodeEmbeddingBlock(torch.nn.Module):
 
 
 @compile_mode("script")
+class EquivariantRMSNormBlock(torch.nn.Module):
+    """Per-node RMS normalisation of each irrep block, with a learnable scale.
+
+    The RMS over all components of an irrep block is rotation invariant, and each
+    block is contiguous in both mul_ir and ir_mul layouts, so this is equivariant
+    and layout independent. Stops feature magnitudes compounding over many layers.
+
+    cap = 0 normalises every block to unit RMS. cap > 0 only shrinks blocks whose
+    RMS exceeds cap (x / max(1, rms / cap)), leaving ordinary atoms unchanged.
+    """
+
+    def __init__(self, irreps: o3.Irreps, cap: float = 0.0, eps: float = 1e-6):
+        super().__init__()
+        self.irreps = o3.Irreps(str(irreps))
+        self.cap = cap
+        self.eps = eps
+        self.block_slices = [(s.start, s.stop) for s in self.irreps.slices()]
+        self.scale = torch.nn.Parameter(torch.ones(len(self.block_slices)))
+
+    def __setstate__(self, state):
+        state.setdefault("cap", 0.0)  # models saved before cap existed
+        super().__setstate__(state)
+
+    def forward(self, node_feats: torch.Tensor) -> torch.Tensor:
+        blocks = []
+        for i, (start, stop) in enumerate(self.block_slices):
+            block = node_feats[:, start:stop]
+            rms = torch.sqrt(torch.mean(block**2, dim=-1, keepdim=True) + self.eps)
+            if self.cap > 0.0:
+                rms = torch.clamp(rms / self.cap, min=1.0)
+            blocks.append(self.scale[i] * block / rms)
+        return torch.cat(blocks, dim=-1)
+
+
+@compile_mode("script")
 class LinearReadoutBlock(torch.nn.Module):
     def __init__(
         self,
@@ -1553,7 +1588,9 @@ class RealAgnosticDensityInteractionBlock(InteractionBlock):
         message = self.truncate_ghosts(message, n_real)
         node_attrs = self.truncate_ghosts(node_attrs, n_real)
         density = self.truncate_ghosts(density, n_real)
-        message = self.linear(message) / (density + 1)
+        # normalise by avg_num_neighbors as in the other blocks; without it the
+        # density (~0 at init) barely scales messages and deep stacks overflow
+        message = self.linear(message / self.avg_num_neighbors) / (density + 1)
         message = self.skip_tp(message, node_attrs)
         return (
             self.reshape(message),

@@ -17,6 +17,7 @@ from mace.tools.scatter import scatter_sum
 from .blocks import (
     AtomicEnergiesBlock,
     EquivariantProductBasisBlock,
+    EquivariantRMSNormBlock,
     InteractionBlock,
     LinearDipoleReadoutBlock,
     LinearNodeEmbeddingBlock,
@@ -489,12 +490,35 @@ class AtomicTargetsMACE(MACE):
         self,
         atomic_inter_scale: float,
         atomic_inter_shift: float,
+        node_feats_norm: bool = False,
+        node_feats_norm_cap: float = 0.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.scale_shift = ScaleShiftBlock(
             scale=atomic_inter_scale, shift=atomic_inter_shift
         )
+        # Optional per-layer normalisation to keep deep stacks numerically stable
+        self.node_norms = torch.nn.ModuleList(
+            [
+                (
+                    EquivariantRMSNormBlock(
+                        str(product.linear.irreps_out), cap=node_feats_norm_cap
+                    )
+                    if node_feats_norm
+                    else torch.nn.Identity()
+                )
+                for product in self.products
+            ]
+        )
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        # models saved before node_norms existed get identity norms
+        if "node_norms" not in self._modules:
+            self.node_norms = torch.nn.ModuleList(
+                [torch.nn.Identity() for _ in self.products]
+            )
 
     def forward(
         self,
@@ -533,8 +557,8 @@ class AtomicTargetsMACE(MACE):
         # Interactions
         node_es_list = []
         node_feats_list = []
-        for interaction, product, readout in zip(
-            self.interactions, self.products, self.readouts
+        for interaction, product, readout, node_norm in zip(
+            self.interactions, self.products, self.readouts, self.node_norms
         ):
             node_feats, sc = interaction(
                 node_attrs=data["node_attrs"],
@@ -546,6 +570,7 @@ class AtomicTargetsMACE(MACE):
             node_feats = product(
                 node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
             )
+            node_feats = node_norm(node_feats)
             node_feats_list.append(node_feats)
             node_es_list.append(
                 readout(node_feats, node_heads)[num_atoms_arange, node_heads]
