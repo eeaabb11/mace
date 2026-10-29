@@ -12,6 +12,7 @@ from .blocks import (
     LinearReadoutBlock,
     NonLinearDipoleReadoutBlock,
     NonLinearReadoutBlock,
+    NonLinearVectorReadoutBlock,
     RadialEmbeddingBlock,
     RealAgnosticAttResidualInteractionBlock,
     RealAgnosticDensityInteractionBlock,
@@ -38,8 +39,9 @@ from .loss import (
     WeightedHuberEnergyForcesStressLoss,
     AtomicTargetsLoss,
     AtomicTargetsSBMRLoss,
+    AtomicVectorTargetsLoss,
 )
-from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE
+from .models import MACE, AtomicDipolesMACE, EnergyDipolesMACE, ScaleShiftMACE, AtomicTargetsMACE, AtomicVectorTargetsMACE
 from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
 from .symmetric_contraction import SymmetricContraction
 from .utils import (
@@ -48,6 +50,7 @@ from .utils import (
     compute_mean_rms_energy_forces,
     compute_mean_std_atomic_inter_energy,
     compute_mean_std_atomic_targets,
+    compute_rms_atomic_vector_targets,
     compute_rms_dipoles,
     compute_statistics,
 )
@@ -71,6 +74,7 @@ scaling_classes: Dict[str, Callable] = {
     "rms_forces_scaling": compute_mean_rms_energy_forces,
     "rms_dipoles_scaling": compute_rms_dipoles,
     "atomic_targets_std_scaling": compute_mean_std_atomic_targets,
+    "atomic_vector_targets_rms_scaling": compute_rms_atomic_vector_targets,
 }
 
 gate_dict: Dict[str, Optional[Callable]] = {
@@ -93,6 +97,7 @@ __all__ = [
     "NonLinearDipoleReadoutBlock",
     "InteractionBlock",
     "NonLinearReadoutBlock",
+    "NonLinearVectorReadoutBlock",
     "PolynomialCutoff",
     "BesselBasis",
     "GaussianBasis",
@@ -100,6 +105,7 @@ __all__ = [
     "ScaleShiftMACE",
     "AtomicDipolesMACE",
     "AtomicTargetsMACE",
+    "AtomicVectorTargetsMACE",
     "EnergyDipolesMACE",
     "WeightedEnergyForcesLoss",
     "WeightedForcesLoss",
@@ -111,11 +117,13 @@ __all__ = [
     "UniversalLoss",
     "AtomicTargetsLoss",
     "AtomicTargetsSBMRLoss",
+    "AtomicVectorTargetsLoss",
     "WeightedEnergyForcesL1L2Loss",
     "SymmetricContraction",
     "interaction_classes",
     "compute_mean_std_atomic_inter_energy",
     "compute_mean_std_atomic_targets",
+    "compute_rms_atomic_vector_targets",
     "compute_avg_num_neighbors",
     "compute_statistics",
     "compute_fixed_charge_dipole",

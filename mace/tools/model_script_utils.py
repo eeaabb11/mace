@@ -64,12 +64,12 @@ def configure_model(
                 )
         args.std = atomic_inter_scale
 
-    elif (args.mean is None or args.std is None) and args.model != "AtomicDipolesMACE" and args.model != "AtomicTargetsMACE":
+    elif (args.mean is None or args.std is None) and args.model not in ("AtomicDipolesMACE", "AtomicTargetsMACE", "AtomicVectorTargetsMACE"):
         args.mean, args.std = modules.scaling_classes[args.scaling](
             train_loader, atomic_energies
         )
     
-    elif args.model == "AtomicTargetsMACE":
+    elif args.model in ("AtomicTargetsMACE", "AtomicVectorTargetsMACE"):
         _, args.std = modules.scaling_classes[args.scaling](
             train_loader, z_table
         )
@@ -249,8 +249,8 @@ def _build_model(
             node_feats_norm=args.node_feats_norm,
             node_feats_norm_cap=args.node_feats_norm_cap,
         )
-    if args.model == "AtomicTargetsMACE":
-        return modules.AtomicTargetsMACE(
+    if args.model == "AtomicVectorTargetsMACE":
+        return modules.AtomicVectorTargetsMACE(
             **model_config,
             pair_repulsion=args.pair_repulsion,
             distance_transform=args.distance_transform,

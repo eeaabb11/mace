@@ -212,6 +212,56 @@ class NonLinearDipoleReadoutBlock(torch.nn.Module):
 
 
 @compile_mode("script")
+class NonLinearVectorReadoutBlock(torch.nn.Module):
+    """Gated readout of one l=1 vector per node.
+
+    The 0e part of the input gives num_channels gates (gate(linear(x))) that scale
+    num_channels 1o channels, which are mixed down to 1x1o. irreps_in must contain both
+    0e and 1o. Unlike NonLinearDipoleReadoutBlock this does not use e3nn's Gate, so it
+    also works in the cueq ir_mul layout. num_channels = number of 0e in MLP_irreps.
+    """
+
+    def __init__(
+        self,
+        irreps_in: o3.Irreps,
+        MLP_irreps: o3.Irreps,
+        gate: Optional[Callable],
+        cueq_config: Optional[CuEquivarianceConfig] = None,
+    ):
+        super().__init__()
+        self.hidden_irreps = MLP_irreps
+        self.num_channels = MLP_irreps.count(o3.Irrep(0, 1))
+        self.ir_mul = (
+            cueq_config is not None
+            and cueq_config.enabled
+            and cueq_config.layout_str == "ir_mul"
+        )
+        gate_irreps = o3.Irreps(f"{self.num_channels}x0e")
+        vector_irreps = o3.Irreps(f"{self.num_channels}x1o")
+        self.linear_gates = Linear(
+            irreps_in=irreps_in, irreps_out=gate_irreps, cueq_config=cueq_config
+        )
+        self.non_linearity = nn.Activation(irreps_in=gate_irreps, acts=[gate])
+        self.linear_vectors = Linear(
+            irreps_in=irreps_in, irreps_out=vector_irreps, cueq_config=cueq_config
+        )
+        self.linear_out = Linear(
+            irreps_in=vector_irreps,
+            irreps_out=o3.Irreps("1x1o"),
+            cueq_config=cueq_config,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # [n_nodes, irreps]
+        gates = self.non_linearity(self.linear_gates(x))  # [n_nodes, num_channels]
+        vectors = self.linear_vectors(x)  # [n_nodes, 3 * num_channels]
+        if self.ir_mul:
+            vectors = vectors.view(-1, 3, self.num_channels) * gates.unsqueeze(1)
+        else:
+            vectors = vectors.view(-1, self.num_channels, 3) * gates.unsqueeze(2)
+        return self.linear_out(vectors.reshape(-1, 3 * self.num_channels))  # [n_nodes, 3]
+
+
+@compile_mode("script")
 class AtomicEnergiesBlock(torch.nn.Module):
     atomic_energies: torch.Tensor
 

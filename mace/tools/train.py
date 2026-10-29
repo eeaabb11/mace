@@ -33,6 +33,7 @@ from .utils import (
     compute_rel_mae,
     compute_rel_rmse,
     compute_rmse,
+    compute_vector_metrics,
 )
 
 
@@ -65,6 +66,13 @@ def valid_err_log(
         error_f = eval_metrics["rmse_f"] * 1e3
         logging.info(
             f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A"
+        )
+    elif log_errors == "AtomicVectorTargetsRMSE":
+        logging.info(
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.4f}, "
+            f"RMSE_vec={eval_metrics['rmse_atomic_target_vec']:.4e}, rel_RMSE_vec={eval_metrics['rel_rmse_atomic_target_vec']:6.2f} %, "
+            f"cos={eval_metrics['cos_sim_atomic_target']:.4f}, "
+            f"rho_x={eval_metrics['pearson_atomic_target_x']:.4f}, rho_y={eval_metrics['pearson_atomic_target_y']:.4f}"
         )
     elif log_errors == "AtomicTargetsPerAtomRMSE":
         error_atom_targets = eval_metrics["rmse_atomic_target_per_atom"] * 1e3 
@@ -741,5 +749,7 @@ class MACELoss(Metric):
             aux["rmse_atomic_target_per_atom"] = compute_rmse(delta_atomic_targets_per_atom)
             aux["rel_rmse_atomic_target"] = compute_rel_rmse(delta_atomic_targets, atomic_targets)
             aux["q95_atomic_target"] = compute_q95(delta_atomic_targets)
+            if atomic_targets.ndim == 2:  # per-atom vectors [n_atoms, 3]
+                aux.update(compute_vector_metrics(atomic_targets, atomic_targets - delta_atomic_targets))
 
         return aux["loss"], aux

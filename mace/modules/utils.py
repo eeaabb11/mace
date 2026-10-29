@@ -322,6 +322,17 @@ def compute_mean_std_atomic_targets(
 
     return atomic_energies_dict, scale
 
+def compute_rms_atomic_vector_targets(
+    data_loader: torch.utils.data.DataLoader,
+    z_table,  # pylint: disable=unused-argument
+) -> Tuple[None, float]:
+    """Scale for [n_nodes, 3] targets: RMS of the vector norm over all atoms. No shift."""
+    sq_norms = []
+    for batch in data_loader:
+        sq_norms.append(torch.sum(batch.atomic_targets**2, dim=-1))
+    scale = torch.sqrt(torch.mean(torch.cat(sq_norms))).item()
+    return None, scale
+
 def compute_mean_std_atomic_inter_energy(
     data_loader: torch.utils.data.DataLoader,
     atomic_energies: np.ndarray,

@@ -38,6 +38,30 @@ def compute_q95(delta: np.ndarray) -> float:
     return np.percentile(np.abs(delta), q=95)
 
 
+def compute_vector_metrics(target: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
+    """Metrics for per-atom vectors [n_atoms, 3]: vector RMSE, mean cosine similarity,
+    and per-component Pearson rho / R^2 (NaN for a component with no variance, e.g. z in 2D)."""
+    delta = target - pred
+    rmse_vec = np.sqrt(np.mean(np.sum(delta**2, axis=-1))).item()
+    rms_target = np.sqrt(np.mean(np.sum(target**2, axis=-1))).item()
+    norms = np.linalg.norm(target, axis=-1) * np.linalg.norm(pred, axis=-1)
+    cos = np.sum(target * pred, axis=-1) / np.maximum(norms, 1e-12)
+    metrics = {
+        "rmse_atomic_target_vec": rmse_vec,
+        "rel_rmse_atomic_target_vec": rmse_vec / (rms_target + 1e-12) * 100,
+        "cos_sim_atomic_target": np.mean(cos).item(),
+    }
+    for i, c in enumerate("xyz"):
+        t, p = target[:, i], pred[:, i]
+        if np.std(t) > 0 and np.std(p) > 0:
+            metrics[f"pearson_atomic_target_{c}"] = np.corrcoef(t, p)[0, 1].item()
+            metrics[f"r2_atomic_target_{c}"] = (1.0 - np.sum((t - p) ** 2) / np.sum((t - t.mean()) ** 2)).item()
+        else:
+            metrics[f"pearson_atomic_target_{c}"] = float("nan")
+            metrics[f"r2_atomic_target_{c}"] = float("nan")
+    return metrics
+
+
 def compute_c(delta: np.ndarray, eta: float) -> float:
     return np.mean(np.abs(delta) < eta).item()
 

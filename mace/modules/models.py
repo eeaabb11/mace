@@ -24,6 +24,7 @@ from .blocks import (
     LinearReadoutBlock,
     NonLinearDipoleReadoutBlock,
     NonLinearReadoutBlock,
+    NonLinearVectorReadoutBlock,
     RadialEmbeddingBlock,
     ScaleShiftBlock,
 )
@@ -588,6 +589,157 @@ class AtomicTargetsMACE(MACE):
         node_energy = node_inter_es
         output = {
             "atomic_targets": node_energy,
+            "node_feats": node_feats_out,
+        }
+
+        return output
+
+
+@compile_mode("script")
+class AtomicVectorTargetsMACE(MACE):
+    """Per-atom l=1 (1o) vector target, e.g. a non-affine displacement field.
+
+    Same backbone as AtomicTargetsMACE, except:
+      - the last layer keeps the full hidden_irreps (MACE keeps only scalars there),
+      - every readout maps to 1x1o, and the contributions are summed over layers,
+      - the output is only scaled (atomic_inter_shift must be 0: a shift would break
+        equivariance). Not summed into a total, unlike AtomicDipolesMACE.
+    Output "atomic_targets" has shape [n_nodes, 3], in the same xyz frame as the positions.
+    """
+
+    def __init__(
+        self,
+        atomic_inter_scale: float,
+        atomic_inter_shift: float,
+        node_feats_norm: bool = False,
+        node_feats_norm_cap: float = 0.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        assert len(self.heads) == 1, "AtomicVectorTargetsMACE supports a single head"
+        assert float(np.max(np.abs(atomic_inter_shift))) == 0.0, "vector targets take no shift"
+        hidden_irreps = o3.Irreps(str(kwargs["hidden_irreps"]))
+        assert hidden_irreps.count(o3.Irrep(0, 1)) > 0 and hidden_irreps.count(o3.Irrep(1, -1)) > 0, \
+            "AtomicVectorTargetsMACE needs 0e and 1o in hidden_irreps (max_L >= 1)"
+        cueq_config = kwargs.get("cueq_config", None)
+        num_interactions = kwargs["num_interactions"]
+        correlation = kwargs["correlation"]
+        if isinstance(correlation, int):
+            correlation = [correlation] * num_interactions
+
+        # MACE built the last layer with scalars only: rebuild it with the full hidden_irreps
+        if num_interactions > 1:
+            last = self.interactions[-1]
+            self.interactions[-1] = kwargs["interaction_cls"](
+                node_attrs_irreps=last.node_attrs_irreps,
+                node_feats_irreps=hidden_irreps,
+                edge_attrs_irreps=last.edge_attrs_irreps,
+                edge_feats_irreps=last.edge_feats_irreps,
+                target_irreps=last.target_irreps,
+                hidden_irreps=hidden_irreps,
+                avg_num_neighbors=last.avg_num_neighbors,
+                radial_MLP=last.radial_MLP,
+                cueq_config=cueq_config,
+            )
+            self.products[-1] = EquivariantProductBasisBlock(
+                node_feats_irreps=last.target_irreps,
+                target_irreps=hidden_irreps,
+                correlation=correlation[-1],
+                num_elements=kwargs["num_elements"],
+                use_sc=True,
+                cueq_config=cueq_config,
+            )
+
+        # 1x1o readouts: linear for all layers but the last, gated for the last
+        self.readouts = torch.nn.ModuleList()
+        for i in range(num_interactions):
+            if num_interactions > 1 and i == num_interactions - 1:
+                self.readouts.append(
+                    NonLinearVectorReadoutBlock(
+                        hidden_irreps, kwargs["MLP_irreps"], kwargs["gate"], cueq_config
+                    )
+                )
+            else:
+                self.readouts.append(
+                    LinearDipoleReadoutBlock(hidden_irreps, dipole_only=True, cueq_config=cueq_config)
+                )
+
+        self.scale_shift = ScaleShiftBlock(
+            scale=atomic_inter_scale, shift=atomic_inter_shift
+        )
+        # Optional per-layer normalisation to keep deep stacks numerically stable
+        self.node_norms = torch.nn.ModuleList(
+            [
+                (
+                    EquivariantRMSNormBlock(
+                        str(product.linear.irreps_out), cap=node_feats_norm_cap
+                    )
+                    if node_feats_norm
+                    else torch.nn.Identity()
+                )
+                for product in self.products
+            ]
+        )
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # Setup
+        data["positions"].requires_grad_(True)
+        data["node_attrs"].requires_grad_(True)
+        node_heads = (
+            data["head"][data["batch"]]
+            if "head" in data
+            else torch.zeros_like(data["batch"])
+        )
+
+        # Embeddings
+        node_feats = self.node_embedding(data["node_attrs"])
+        vectors, lengths = get_edge_vectors_and_lengths(
+            positions=data["positions"],
+            edge_index=data["edge_index"],
+            shifts=data["shifts"],
+        )
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(
+            lengths, data["node_attrs"], data["edge_index"], self.atomic_numbers
+        )
+
+        # Interactions
+        node_vectors_list = []
+        node_feats_list = []
+        for interaction, product, readout, node_norm in zip(
+            self.interactions, self.products, self.readouts, self.node_norms
+        ):
+            node_feats, sc = interaction(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+            )
+            node_feats = product(
+                node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
+            )
+            node_feats = node_norm(node_feats)
+            node_feats_list.append(node_feats)
+            node_vectors_list.append(readout(node_feats))  # [n_nodes, 3]
+
+        # Concatenate node features
+        node_feats_out = torch.cat(node_feats_list, dim=-1)
+        # Sum over interactions, then scale (no shift)
+        node_vectors = torch.sum(torch.stack(node_vectors_list, dim=0), dim=0)  # [n_nodes, 3]
+        node_vectors = torch.atleast_1d(self.scale_shift.scale)[node_heads].unsqueeze(-1) * node_vectors
+
+        output = {
+            "atomic_targets": node_vectors,
             "node_feats": node_feats_out,
         }
 

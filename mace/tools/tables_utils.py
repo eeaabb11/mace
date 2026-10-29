@@ -49,6 +49,17 @@ def create_error_table(
             "RMSE F / meV / A",
             "relative F RMSE %",
         ]
+    elif table_type == "AtomicVectorTargetsRMSE":
+        table.field_names = [
+            "config_type",
+            "RMSE vec",
+            "relative RMSE vec %",
+            "cos sim",
+            "Pearson x",
+            "Pearson y",
+            "R2 x",
+            "R2 y",
+        ]
     elif table_type == "AtomicTargetsPerAtomRMSE":
         table.field_names = [
             "config_type",
@@ -141,6 +152,19 @@ def create_error_table(
                     f"{metrics['rmse_e'] * 1000:8.1f}",
                     f"{metrics['rmse_f'] * 1000:8.1f}",
                     f"{metrics['rel_rmse_f']:8.2f}",
+                ]
+            )
+        elif table_type == "AtomicVectorTargetsRMSE":
+            table.add_row(
+                [
+                    name,
+                    f"{metrics['rmse_atomic_target_vec']:.4e}",
+                    f"{metrics['rel_rmse_atomic_target_vec']:8.2f}",
+                    f"{metrics['cos_sim_atomic_target']:.4f}",
+                    f"{metrics['pearson_atomic_target_x']:.4f}",
+                    f"{metrics['pearson_atomic_target_y']:.4f}",
+                    f"{metrics['r2_atomic_target_x']:.4f}",
+                    f"{metrics['r2_atomic_target_y']:.4f}",
                 ]
             )
         elif table_type == "AtomicTargetsPerAtomRMSE":

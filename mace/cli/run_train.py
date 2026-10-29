@@ -415,7 +415,7 @@ def run(args) -> None:
     # Atomic energies
     atomic_energies_dict = {}
     for head_config in head_configs:
-        if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model != "AtomicTargetsMACE":
+        if (head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0) and args.model not in ("AtomicTargetsMACE", "AtomicVectorTargetsMACE"):
             assert head_config.E0s is not None, "Atomic energies must be provided"
             if all(check_path_ase_read(f) for f in head_config.train_file) and head_config.E0s.lower() != "foundation":
                 atomic_energies_dict[head_config.head_name] = get_atomic_energies(
@@ -483,8 +483,12 @@ def run(args) -> None:
         args.compute_forces = False
         args.compute_virials = False
         args.compute_stress = False
-    elif args.model == "AtomicTargetsMACE":
-        args.scaling = "atomic_targets_std_scaling"
+    elif args.model in ("AtomicTargetsMACE", "AtomicVectorTargetsMACE"):
+        args.scaling = (
+            "atomic_targets_std_scaling"
+            if args.model == "AtomicTargetsMACE"
+            else "atomic_vector_targets_rms_scaling"
+        )
         atomic_energies = None
         #atomic_targets = dict_to_array(atomic_targets_dict, heads)
         dipole_only = False
@@ -690,7 +694,7 @@ def run(args) -> None:
     # Cueq
     if args.enable_cueq:
         logging.info("Converting model to CUEQ for accelerated training")
-        assert model.__class__.__name__ in ["MACE", "ScaleShiftMACE", "AtomicTargetsMACE"]
+        assert model.__class__.__name__ in ["MACE", "ScaleShiftMACE", "AtomicTargetsMACE", "AtomicVectorTargetsMACE"]
         model = run_e3nn_to_cueq(deepcopy(model), device=device)
     # Optimizer
     param_options = get_params_options(args, model)

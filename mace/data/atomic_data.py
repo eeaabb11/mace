@@ -69,7 +69,7 @@ class AtomicData(torch_geometric.data.Data):
         virials: Optional[torch.Tensor],  # [1,3,3]
         dipole: Optional[torch.Tensor],  # [, 3]
         charges: Optional[torch.Tensor],  # [n_nodes, ]
-        atomic_targets: Optional[torch.Tensor], # [n_nodes, ]
+        atomic_targets: Optional[torch.Tensor], # [n_nodes, ] or [n_nodes, 3]
         atomic_targets_mask: Optional[torch.Tensor], # [n_nodes, ]
     ):
         # Check shapes
@@ -95,7 +95,7 @@ class AtomicData(torch_geometric.data.Data):
         assert virials is None or virials.shape == (1, 3, 3)
         assert dipole is None or dipole.shape[-1] == 3
         assert charges is None or charges.shape == (num_nodes,)
-        assert atomic_targets is None or atomic_targets.shape == (num_nodes,)
+        assert atomic_targets is None or atomic_targets.shape in ((num_nodes,), (num_nodes, 3))
         assert atomic_targets_mask is None or atomic_targets_mask.shape == (num_nodes, )
         # Aggregate data
         data = {

@@ -54,6 +54,11 @@ def transfer_symmetric_contractions(
 ):
     """Transfer symmetric contraction weights from CuEq to E3nn format"""
     kmax_pairs = get_kmax_pairs(max_L, correlation, num_layers)
+    # take the number of contractions per layer from the e3nn target, so that models whose
+    # last layer keeps l>0 (AtomicVectorTargetsMACE) are handled too
+    for pair in kmax_pairs:
+        prefix = f"products.{pair[0]}.symmetric_contractions.contractions."
+        pair[1] = max(int(k[len(prefix):].split(".")[0]) for k in target_dict if k.startswith(prefix))
 
     for i, kmax in kmax_pairs:
         # Get the combined weight tensor from source
@@ -133,6 +138,10 @@ def transfer_weights(
             if source_dict[key].shape == target_dict[key].shape:
                 logging.debug(f"Transferring additional key: {key}")
                 target_dict[key] = source_dict[key]
+            elif source_dict[key].numel() == target_dict[key].numel():
+                # cueq linear weights are [1, N] where e3nn has [N]
+                logging.debug(f"Transferring additional key with reshape: {key}")
+                target_dict[key] = source_dict[key].reshape(target_dict[key].shape)
             else:
                 logging.warning(
                     f"Shape mismatch for key {key}: "

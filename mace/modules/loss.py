@@ -242,6 +242,34 @@ class AtomicTargetsLoss(torch.nn.Module):
         return f"{self.__class__.__name__}(huber_delta={self.huber_loss.delta:.3f})"
     
 # ------------------------------------------------------------------------------
+# Atomic Vector Targets Loss: per-atom [n_nodes, 3] targets, e.g. displacements
+# ------------------------------------------------------------------------------
+class AtomicVectorTargetsLoss(torch.nn.Module):
+    """Huber loss summed over the vector components, averaged over masked atoms (x 1e3)."""
+
+    def __init__(self, huber_delta=0.01, random_mask=False, random_mask_ratio=None) -> None:
+        super().__init__()
+        self.huber_delta = huber_delta
+        self.random_mask = random_mask
+        self.random_mask_ratio = random_mask_ratio
+
+    def forward(self, ref: Batch, pred: TensorDict) -> torch.Tensor:
+        mask = ref["atomic_targets_mask"]
+        if self.random_mask:
+            ones_indices = torch.nonzero(mask, as_tuple=True)[0]
+            num_ones_to_keep = int(len(ones_indices) * self.random_mask_ratio)
+            selected_indices = ones_indices[torch.randperm(len(ones_indices))[:num_ones_to_keep]]
+            mask = torch.zeros_like(mask)
+            mask[selected_indices] = 1
+        raw = torch.nn.functional.huber_loss(
+            pred["atomic_targets"], ref["atomic_targets"], reduction="none", delta=self.huber_delta
+        ).sum(dim=-1)  # [n_nodes]
+        return (raw * mask).sum() / mask.sum().clamp_min(1) * 1e3
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(huber_delta={self.huber_delta:.3f})"
+
+# ------------------------------------------------------------------------------
 # Atomic Targets Loss with Systematic Unbiased Predictions Scaling -- Ref: https://arxiv.org/pdf/2405.15950v2
 # ------------------------------------------------------------------------------
 class AtomicTargetsSBMRLoss(torch.nn.Module):

@@ -112,6 +112,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "DipoleMAE",
             "EnergyDipoleRMSE",
             "AtomicTargetsPerAtomRMSE",
+            "AtomicVectorTargetsRMSE",
         ],
         default="PerAtomRMSE",
     )
@@ -129,6 +130,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "AtomicDipolesMACE",
             "EnergyDipolesMACE",
             "AtomicTargetsMACE",
+            "AtomicVectorTargetsMACE",
         ],
     )
     parser.add_argument(
@@ -575,7 +577,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "energy_forces_dipole",
             "l1l2energyforces",
             "atomic_targets",
-            "atomic_targets_sbmr"
+            "atomic_targets_sbmr",
+            "atomic_vector_targets",
         ],
     )
     parser.add_argument(
